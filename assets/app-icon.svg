@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="mpv-enjoy Home">
+  <defs>
+    <linearGradient id="bg" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8b6df5"/>
+      <stop offset="1" stop-color="#5529b7"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#321473" flood-opacity=".32"/>
+    </filter>
+  </defs>
+  <rect x="28" y="28" width="456" height="456" rx="126" fill="url(#bg)"/>
+  <path d="M128 245 256 139l128 106v127a36 36 0 0 1-36 36H164a36 36 0 0 1-36-36V245Z" fill="#fff" opacity=".96" filter="url(#shadow)"/>
+  <path d="m238 246 86 51a18 18 0 0 1 0 31l-86 51a18 18 0 0 1-27-16V262a18 18 0 0 1 27-16Z" fill="#6840d3"/>
+  <path d="m104 254 152-126 152 126" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="42"/>
+</svg>

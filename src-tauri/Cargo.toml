@@ -1,0 +1,25 @@
+[package]
+name = "mpv-enjoy-home"
+version = "0.1.0"
+description = "A lightweight, reusable media home for mpv distributions"
+authors = ["mpv-enjoy Home contributors"]
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[lib]
+name = "mpv_enjoy_home_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "mpv-enjoy-home"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+rusqlite = { version = "=0.39.0", features = ["bundled"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+tauri = { version = "=2.11.5", features = [] }
+tauri-plugin-dialog = "=2.7.2"
