@@ -9,7 +9,7 @@
     MediaServerInput,
     MediaServerSummary,
     PlayerStatus,
-    RecentCollection,
+    RecentMediaItem,
     RemoteEpisodeDetail,
     RemoteLibraryEntry,
     RemoteMediaDetail,
@@ -30,7 +30,7 @@
   let view = $state<View>('home');
   let folders = $state<FolderSummary[]>([]);
   let servers = $state<MediaServerSummary[]>([]);
-  let recentCollections = $state<RecentCollection[]>([]);
+  let recentMedia = $state<RecentMediaItem[]>([]);
   let selectedSource = $state<LibrarySource | null>(null);
   let localEntries = $state<LibraryEntry[]>([]);
   let remoteEntries = $state<RemoteLibraryEntry[]>([]);
@@ -93,10 +93,9 @@
 
   async function refreshOverview() {
     try {
-      [folders, servers, recentCollections, player] = await Promise.all([
+      [folders, servers, player] = await Promise.all([
         api.listFolders(),
         api.listMediaServers(),
-        api.listRecentCollections(8),
         api.getPlayerStatus(),
       ]);
       if (selectedSource?.kind === 'local') {
@@ -108,6 +107,7 @@
         const server = servers.find((entry) => entry.id === selectedServerId);
         selectedSource = server ? { kind: 'remote', server } : null;
       }
+      recentMedia = await api.listRecentMedia(8);
     } catch (error) {
       notify('error', normalizeError(error));
     }
@@ -140,18 +140,12 @@
     await withBusy(
       `正在连接 ${serverKindLabel(serverDraft.kind)}…`,
       async () => {
-        const usesPassword = serverDraft.authMode === 'password';
         const server = await api.addMediaServer({
           kind: serverDraft.kind,
-          authMode: serverDraft.authMode,
           name: serverDraft.name.trim(),
           baseUrl: serverDraft.baseUrl.trim(),
-          token: usesPassword ? '' : serverDraft.token.trim(),
-          userId: usesPassword
-            ? undefined
-            : serverDraft.userId?.trim() || undefined,
-          username: usesPassword ? serverDraft.username.trim() : '',
-          password: usesPassword ? serverDraft.password : '',
+          username: serverDraft.username.trim(),
+          password: serverDraft.password,
         });
         serverDraft = emptyServerDraft();
         showServerForm = false;
@@ -482,23 +476,38 @@
     }
   }
 
-  function openFirstLibrary() {
-    if (selectedSource?.kind === 'local') {
-      void openLocalFolder(selectedSource.folder, currentPath);
-    } else if (selectedSource?.kind === 'remote') {
-      void openRemoteServer(selectedSource.server);
-    } else if (folders[0]) {
-      void openLocalFolder(folders[0]);
-    } else if (servers[0]) {
-      void openRemoteServer(servers[0]);
-    } else {
-      view = 'library';
-    }
+  function openLibrarySources() {
+    view = 'library';
+    selectedSource = null;
+    localEntries = [];
+    remoteEntries = [];
+    remoteDetail = null;
+    remoteImages = {};
+    remoteBackdrop = null;
+    remoteCrumbs = [];
+    currentPath = '';
+    search = '';
   }
 
-  function openRecent(collection: RecentCollection) {
-    const folder = folders.find((entry) => entry.id === collection.folderId);
-    if (folder) void openLocalFolder(folder, collection.relativePath);
+  function openRecent(item: RecentMediaItem) {
+    if (item.sourceKind === 'local') {
+      const folder = folders.find((entry) => entry.id === item.sourceId);
+      if (folder) void openLocalFolder(folder, item.targetId);
+      return;
+    }
+
+    const server = servers.find((entry) => entry.id === item.sourceId);
+    if (!server) return;
+    view = 'library';
+    selectedSource = { kind: 'remote', server };
+    currentPath = '';
+    localEntries = [];
+    search = '';
+    remoteCrumbs = [
+      { id: null, name: server.name, mode: 'list' },
+      { id: item.targetId, name: item.targetName, mode: 'detail' },
+    ];
+    void loadRemoteDetail(server, item.targetId);
   }
 
   function navigateLocal(path: string) {
@@ -557,6 +566,14 @@
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
+    }).format(new Date(timestamp * 1000));
+  }
+
+  function formatUpdateTime(timestamp: number) {
+    if (timestamp <= 0) return '最近更新';
+    return new Intl.DateTimeFormat('zh-CN', {
+      month: 'short',
+      day: 'numeric',
     }).format(new Date(timestamp * 1000));
   }
 
@@ -733,12 +750,9 @@
 
   function emptyServerDraft(): MediaServerInput {
     return {
-      kind: 'jellyfin',
-      authMode: 'password',
+      kind: 'emby',
       name: '',
       baseUrl: '',
-      token: '',
-      userId: '',
       username: '',
       password: '',
     };
@@ -762,16 +776,11 @@
 
 <div class="app-shell">
   <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-mark"><Icon name="play" size={18} /></div>
-      <div><strong>mpv-enjoy</strong><span>Home</span></div>
-    </div>
-
     <nav aria-label="主导航">
       <button class:active={view === 'home'} onclick={() => (view = 'home')}>
         <Icon name="home" /><span>首页</span>
       </button>
-      <button class:active={view === 'library'} onclick={openFirstLibrary}>
+      <button class:active={view === 'library'} onclick={openLibrarySources}>
         <Icon name="library" /><span>媒体库</span>
         {#if sourceCount > 0}<em>{sourceCount}</em>{/if}
       </button>
@@ -780,17 +789,9 @@
         onclick={() => (view = 'settings')}
       >
         <Icon name="settings" /><span>设置</span>
-        <i
-          class:ready={player?.available}
-          aria-label={player?.available ? '播放器可用' : '播放器未配置'}
-        ></i>
       </button>
     </nav>
 
-    <div class="sidebar-note">
-      <Icon name="sparkles" size={18} />
-      <p>统一整理本地目录、Emby 与 Jellyfin，播放仍完整交给你的 mpv。</p>
-    </div>
     <span class="version">Technical preview · 0.1.0</span>
   </aside>
 
@@ -800,7 +801,6 @@
         <div>
           <span class="eyebrow">欢迎回来</span>
           <h1>今天想看点什么？</h1>
-          <p>本地目录与家庭媒体服务器，都在同一个入口。</p>
         </div>
         <div class="header-actions">
           <button class="secondary" onclick={showConnectServer}>
@@ -812,47 +812,11 @@
         </div>
       </header>
 
-      <section class="hero">
-        <div class="hero-copy">
-          <span class="hero-label"
-            ><Icon name="sparkles" size={16} /> 一个媒体首页</span
-          >
-          <h2>按作品浏览，不再被文件淹没。</h2>
-          <p>保留本地文件夹层级，也理解 Emby / Jellyfin 的剧集与季度结构。</p>
-          <div class="hero-stats">
-            <div><strong>{sourceCount}</strong><span>个媒体源</span></div>
-            <div><strong>{totalMedia}</strong><span>个本地视频</span></div>
-            <div>
-              <strong class:status-good={player?.available}>
-                {player?.available ? '就绪' : '待设置'}
-              </strong>
-              <span>播放器</span>
-            </div>
-          </div>
-        </div>
-        <div class="hero-art" aria-hidden="true">
-          <div class="orb orb-one"></div>
-          <div class="orb orb-two"></div>
-          <div class="play-tile"><Icon name="play" size={42} /></div>
-        </div>
-      </section>
-
       <section class="content-section">
         <div class="section-heading">
           <div>
             <h2>媒体源</h2>
-            <p>本地目录与家庭媒体服务器</p>
           </div>
-          {#if sourceCount > 0}
-            <div class="inline-actions">
-              <button class="text-button" onclick={showConnectServer}
-                >连接服务器</button
-              >
-              <button class="text-button" onclick={addFolder}
-                >添加目录 <Icon name="add" size={16} /></button
-              >
-            </div>
-          {/if}
         </div>
 
         {#if sourceCount === 0}
@@ -950,26 +914,33 @@
         {/if}
       </section>
 
-      {#if recentCollections.length > 0}
+      {#if recentMedia.length > 0}
         <section class="content-section">
           <div class="section-heading">
             <div>
-              <h2>最近更新的收藏</h2>
-              <p>同一目录或剧集只显示一次</p>
+              <h2>最近更新</h2>
             </div>
           </div>
           <div class="recent-grid">
-            {#each recentCollections as collection (collection.key)}
-              <button
-                class="recent-card"
-                onclick={() => openRecent(collection)}
-              >
-                <span class="recent-icon"><Icon name="folder" size={22} /></span
+            {#each recentMedia as item (item.key)}
+              <button class="recent-card" onclick={() => openRecent(item)}>
+                <span
+                  class:remote={item.sourceKind === 'remote'}
+                  class="recent-icon"
                 >
+                  <Icon
+                    name={item.sourceKind === 'remote' ? 'server' : 'video'}
+                    size={22}
+                  />
+                </span>
                 <span class="recent-copy">
-                  <strong>{collection.name}</strong>
-                  <small>{collection.latestMediaName}</small>
-                  <span>{collection.mediaCount} 个视频</span>
+                  <strong>{item.name}</strong>
+                  <small>{item.context}</small>
+                  <span
+                    >{item.sourceName} · {formatUpdateTime(
+                      item.updatedAt,
+                    )}</span
+                  >
                 </span>
                 <Icon name="back" size={17} />
               </button>
@@ -978,34 +949,41 @@
         </section>
       {/if}
     {:else if view === 'library'}
-      <header class="page-header compact">
+      <header class="page-header compact library-header">
         <div>
-          <span class="eyebrow">媒体库</span>
+          {#if selectedSource}<span class="eyebrow">媒体库</span>{/if}
           <h1>
             {selectedSource?.kind === 'local'
               ? selectedSource.folder.name
               : selectedSource?.kind === 'remote'
                 ? selectedSource.server.name
-                : '选择一个媒体源'}
+                : '媒体库'}
           </h1>
-          <p>
-            {selectedSource?.kind === 'local'
-              ? selectedSource.folder.path
-              : selectedSource?.kind === 'remote'
-                ? `${serverKindLabel(selectedSource.server.kind)} · ${selectedSource.server.userName}`
-                : '从首页添加本地目录，或连接 Emby / Jellyfin'}
-          </p>
+          {#if selectedSource}
+            <p>
+              {selectedSource.kind === 'local'
+                ? selectedSource.folder.path
+                : `${serverKindLabel(selectedSource.server.kind)} · ${selectedSource.server.userName}`}
+            </p>
+          {/if}
         </div>
-        {#if selectedSource?.kind === 'local'}
-          <button class="secondary" onclick={rescanSelectedFolder}
-            ><Icon name="refresh" />重新扫描</button
-          >
-        {:else if selectedSource?.kind === 'remote'}
-          <button
-            class="secondary"
-            onclick={() => navigateRemoteCrumb(remoteCrumbs.length - 1)}
-            ><Icon name="refresh" />刷新</button
-          >
+        {#if selectedSource}
+          <div class="header-actions horizontal">
+            <button class="secondary" onclick={openLibrarySources}
+              ><Icon name="back" />媒体源</button
+            >
+            {#if selectedSource.kind === 'local'}
+              <button class="secondary" onclick={rescanSelectedFolder}
+                ><Icon name="refresh" />重新扫描</button
+              >
+            {:else}
+              <button
+                class="secondary"
+                onclick={() => navigateRemoteCrumb(remoteCrumbs.length - 1)}
+                ><Icon name="refresh" />刷新</button
+              >
+            {/if}
+          </div>
         {/if}
       </header>
 
@@ -1023,50 +1001,55 @@
             >
           </div>
         </div>
-      {:else}
-        <div class="library-toolbar">
-          <div class="source-switcher" aria-label="媒体源">
+      {:else if !selectedSource}
+        <section class="content-section source-picker-section">
+          <div class="source-grid">
             {#each folders as folder (folder.id)}
-              <button
-                class:active={selectedSource?.kind === 'local' &&
-                  selectedSource.folder.id === folder.id}
-                onclick={() => openLocalFolder(folder)}
-              >
-                <Icon name="folder" size={15} />{folder.name}<span
-                  >{folder.mediaCount}</span
+              <article class="source-card">
+                <button
+                  class="source-main"
+                  onclick={() => openLocalFolder(folder)}
                 >
-              </button>
+                  <span class="source-icon"
+                    ><Icon name="folder" size={30} /></span
+                  >
+                  <span class="source-copy">
+                    <span class="source-kind">本地目录</span>
+                    <strong>{folder.name}</strong>
+                    <small title={folder.path}>{folder.path}</small>
+                    <span>{folder.mediaCount} 个视频</span>
+                  </span>
+                  <span class="source-open"><Icon name="back" size={17} /></span
+                  >
+                </button>
+              </article>
             {/each}
             {#each servers as server (server.id)}
-              <button
-                class:active={selectedSource?.kind === 'remote' &&
-                  selectedSource.server.id === server.id}
-                onclick={() => openRemoteServer(server)}
-              >
-                <Icon name="server" size={15} />{server.name}<span
-                  >{serverKindLabel(server.kind)}</span
+              <article class="source-card server-card">
+                <button
+                  class="source-main"
+                  onclick={() => openRemoteServer(server)}
                 >
-              </button>
+                  <span class="source-icon"
+                    ><Icon name="server" size={28} /></span
+                  >
+                  <span class="source-copy">
+                    <span class="source-kind"
+                      >{serverKindLabel(server.kind)}</span
+                    >
+                    <strong>{server.name}</strong>
+                    <small title={server.baseUrl}>{server.baseUrl}</small>
+                    <span>{server.userName}</span>
+                  </span>
+                  <span class="source-open"><Icon name="back" size={17} /></span
+                  >
+                </button>
+              </article>
             {/each}
           </div>
-          {#if !remoteDetail}
-            <label class="search-box">
-              <Icon name="search" size={18} />
-              <input
-                bind:value={search}
-                type="search"
-                placeholder="搜索当前位置"
-                aria-label="搜索当前位置"
-              />
-              {#if search}<button
-                  onclick={() => (search = '')}
-                  aria-label="清除搜索">×</button
-                >{/if}
-            </label>
-          {/if}
-        </div>
-
-        {#if selectedSource}
+        </section>
+      {:else}
+        <div class="library-toolbar context-toolbar">
           <div class="breadcrumbs" aria-label="当前位置">
             {#if selectedSource.kind === 'local'}
               {#each localBreadcrumbs() as crumb, index}
@@ -1087,7 +1070,22 @@
               {/each}
             {/if}
           </div>
-        {/if}
+          {#if !remoteDetail}
+            <label class="search-box">
+              <Icon name="search" size={18} />
+              <input
+                bind:value={search}
+                type="search"
+                placeholder="搜索当前位置"
+                aria-label="搜索当前位置"
+              />
+              {#if search}<button
+                  onclick={() => (search = '')}
+                  aria-label="清除搜索">×</button
+                >{/if}
+            </label>
+          {/if}
+        </div>
 
         {#if libraryLoading}
           <div class="library-loading" role="status">
@@ -1436,9 +1434,7 @@
     {:else}
       <header class="page-header compact">
         <div>
-          <span class="eyebrow">偏好设置</span>
           <h1>设置</h1>
-          <p>配置播放器与家庭媒体服务器。</p>
         </div>
       </header>
 
@@ -1451,7 +1447,6 @@
               >{player?.available ? '可用' : '未找到'}</span
             >
           </div>
-          <p>首页只会通过安全的参数数组启动这个程序，不会改写它的配置。</p>
           <dl>
             <div>
               <dt>来源</dt>
@@ -1486,10 +1481,6 @@
                 : '未连接'}</span
             >
           </div>
-          <p>
-            可使用用户名和密码登录，密码不会保存；服务器返回的令牌保存在本机应用数据目录，
-            保存后不会再返回 WebView。
-          </p>
 
           {#if servers.length > 0}
             <div class="server-list">
@@ -1530,8 +1521,8 @@
             >
               <label
                 ><span>服务类型</span><select bind:value={serverDraft.kind}
-                  ><option value="jellyfin">Jellyfin</option><option
-                    value="emby">Emby</option
+                  ><option value="emby">Emby</option><option value="jellyfin"
+                    >Jellyfin</option
                   ></select
                 ></label
               >
@@ -1547,54 +1538,24 @@
                   type="url"
                   required
                   placeholder="http://192.168.1.20:8096"
-                /><small>如配置了 Base URL，请包含完整路径。</small></label
+                /></label
               >
-              <label class="wide"
-                ><span>登录方式</span><select bind:value={serverDraft.authMode}
-                  ><option value="password">用户名和密码</option><option
-                    value="token">访问令牌 / API Key</option
-                  ></select
-                ></label
+              <label
+                ><span>用户名</span><input
+                  bind:value={serverDraft.username}
+                  required
+                  autocomplete="username"
+                  placeholder="Emby / Jellyfin 用户名"
+                /></label
               >
-              {#if serverDraft.authMode === 'password'}
-                <label
-                  ><span>用户名</span><input
-                    bind:value={serverDraft.username}
-                    required
-                    autocomplete="username"
-                    placeholder="Emby / Jellyfin 用户名"
-                  /></label
-                >
-                <label
-                  ><span>密码</span><input
-                    bind:value={serverDraft.password}
-                    type="password"
-                    autocomplete="current-password"
-                    placeholder="无密码账户可留空"
-                  /></label
-                >
-                <p class="form-note wide">
-                  密码只用于向服务器登录并换取访问令牌，不会保存到本机数据库；非可信网络请使用
-                  HTTPS。
-                </p>
-              {:else}
-                <label class="wide"
-                  ><span>访问令牌 / API Key</span><input
-                    bind:value={serverDraft.token}
-                    type="password"
-                    required
-                    autocomplete="off"
-                    placeholder="X-Emby-Token"
-                  /></label
-                >
-                <label class="wide"
-                  ><span>用户 ID（可选）</span><input
-                    bind:value={serverDraft.userId}
-                    autocomplete="off"
-                    placeholder="API Key 对应多个用户时建议填写"
-                  /></label
-                >
-              {/if}
+              <label
+                ><span>密码</span><input
+                  bind:value={serverDraft.password}
+                  type="password"
+                  autocomplete="current-password"
+                  placeholder="无密码账户可留空"
+                /></label
+              >
               <div class="form-actions wide">
                 <button
                   type="button"
@@ -1618,11 +1579,7 @@
         <div class="settings-copy">
           <div class="settings-title">
             <h2>本地媒体索引</h2>
-            <span>SQLite</span>
           </div>
-          <p>
-            数据库位于系统应用数据目录。移除目录只会删除索引，永远不会删除媒体文件。
-          </p>
           <dl>
             <div>
               <dt>目录</dt>

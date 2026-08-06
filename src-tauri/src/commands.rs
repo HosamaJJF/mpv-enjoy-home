@@ -1,7 +1,7 @@
 use crate::application::AppService;
 use crate::domain::{
     FolderSummary, LibraryEntry, MediaItem, MediaServerInput, MediaServerSummary, PlayerStatus,
-    RecentCollection, RemoteLibraryEntry, RemoteMediaDetail,
+    RecentMediaItem, RemoteLibraryEntry, RemoteMediaDetail,
 };
 use std::path::PathBuf;
 use tauri::State;
@@ -75,14 +75,17 @@ pub fn list_library_entries(
 }
 
 #[tauri::command]
-pub fn list_recent_collections(
+pub async fn list_recent_media(
     state: State<'_, AppState>,
     limit: Option<usize>,
-) -> Result<Vec<RecentCollection>, String> {
-    state
-        .service
-        .list_recent_collections(limit.unwrap_or(8).min(24))
-        .map_err(|error| error.0)
+) -> Result<Vec<RecentMediaItem>, String> {
+    let service = state.service.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.list_recent_media(limit.unwrap_or(8).min(24))
+    })
+    .await
+    .map_err(|error| format!("最近更新读取任务失败：{error}"))?
+    .map_err(|error| error.0)
 }
 
 #[tauri::command]

@@ -28,23 +28,23 @@ export interface LibraryEntry {
   mediaCount: number;
 }
 
-export interface RecentCollection {
+export interface RecentMediaItem {
   key: string;
-  folderId: number;
+  sourceKind: 'local' | 'remote';
+  sourceId: number;
+  sourceName: string;
+  targetId: string;
+  targetName: string;
   name: string;
-  relativePath: string;
-  mediaCount: number;
-  latestMediaName: string;
-  modifiedAt: number;
+  context: string;
+  itemType: string;
+  updatedAt: number;
 }
 
 export interface MediaServerInput {
   kind: 'emby' | 'jellyfin';
-  authMode: 'password' | 'token';
   name: string;
   baseUrl: string;
-  token: string;
-  userId?: string;
   username: string;
   password: string;
 }

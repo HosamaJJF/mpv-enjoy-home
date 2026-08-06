@@ -6,7 +6,7 @@ import type {
   MediaServerInput,
   MediaServerSummary,
   PlayerStatus,
-  RecentCollection,
+  RecentMediaItem,
   RemoteLibraryEntry,
   RemoteMediaDetail,
 } from './types';
@@ -31,8 +31,8 @@ export const api = {
       parent: parent || null,
       query: query || null,
     }),
-  listRecentCollections: (limit = 8) =>
-    invoke<RecentCollection[]>('list_recent_collections', { limit }),
+  listRecentMedia: (limit = 8) =>
+    invoke<RecentMediaItem[]>('list_recent_media', { limit }),
   listMediaServers: () => invoke<MediaServerSummary[]>('list_media_servers'),
   addMediaServer: (input: MediaServerInput) =>
     invoke<MediaServerSummary>('add_media_server', { input }),

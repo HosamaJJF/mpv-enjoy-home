@@ -1,6 +1,6 @@
 use crate::domain::{
     FolderSummary, LibraryEntry, MediaItem, MediaServerInput, MediaServerSummary, PlayerStatus,
-    RecentCollection, RemoteLibraryEntry, RemoteMediaDetail, natural_cmp,
+    RecentMediaItem, RemoteLibraryEntry, RemoteMediaDetail, natural_cmp,
 };
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::database::Database;
@@ -119,63 +119,92 @@ impl AppService {
         Ok(entries)
     }
 
-    pub fn list_recent_collections(&self, limit: usize) -> AppResult<Vec<RecentCollection>> {
-        let folders = self.database.list_folders()?;
-        let folder_names = folders
-            .iter()
-            .map(|folder| (folder.id, folder.name.clone()))
+    pub fn list_recent_media(&self, limit: usize) -> AppResult<Vec<RecentMediaItem>> {
+        let folders = self
+            .database
+            .list_folders()?
+            .into_iter()
+            .map(|folder| (folder.id, folder))
             .collect::<HashMap<_, _>>();
-        let folder_paths = folders
-            .iter()
-            .map(|folder| (folder.id, folder.clone()))
-            .collect::<HashMap<_, _>>();
-        let mut collections: HashMap<(i64, String), RecentCollection> = HashMap::new();
+        let mut recent = self
+            .database
+            .list_all_media()?
+            .into_iter()
+            .filter_map(|item| {
+                let folder = folders.get(&item.folder_id)?;
+                let relative_path = media_relative_path(folder, &item);
+                let parent = relative_path
+                    .rsplit_once('/')
+                    .map(|(parent, _)| parent)
+                    .unwrap_or("");
+                Some(RecentMediaItem {
+                    key: format!("local:{}:{}", item.folder_id, item.id),
+                    source_kind: "local".to_string(),
+                    source_id: item.folder_id,
+                    source_name: folder.name.clone(),
+                    target_id: parent.to_string(),
+                    target_name: folder.name.clone(),
+                    name: item.name,
+                    context: if parent.is_empty() {
+                        "根目录".to_string()
+                    } else {
+                        parent.replace('/', " / ")
+                    },
+                    item_type: item.extension,
+                    updated_at: item.modified_at,
+                })
+            })
+            .collect::<Vec<_>>();
 
-        for item in self.database.list_all_media()? {
-            let Some(folder) = folder_paths.get(&item.folder_id) else {
+        let servers = self
+            .database
+            .list_media_servers()?
+            .into_iter()
+            .map(|server| self.database.media_server(server.id))
+            .collect::<AppResult<Vec<_>>>()?;
+        let remote_batches = std::thread::scope(|scope| {
+            let handles = servers
+                .iter()
+                .map(|server| {
+                    scope.spawn(move || {
+                        let result = RemoteClient::from_config(server)
+                            .and_then(|client| client.list_recent_media(limit));
+                        (server.id, server.name.clone(), result)
+                    })
+                })
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .filter_map(|handle| handle.join().ok())
+                .collect::<Vec<_>>()
+        });
+
+        for (server_id, server_name, batch) in remote_batches {
+            let Ok(batch) = batch else {
                 continue;
             };
-            let relative_path = media_relative_path(folder, &item);
-            let group_path = relative_path
-                .split_once('/')
-                .map(|(directory, _)| directory)
-                .unwrap_or("")
-                .to_string();
-            let name = if group_path.is_empty() {
-                folder_names
-                    .get(&item.folder_id)
-                    .cloned()
-                    .unwrap_or_else(|| "媒体目录".to_string())
-            } else {
-                group_path.clone()
-            };
-            let collection = collections
-                .entry((item.folder_id, group_path.clone()))
-                .or_insert_with(|| RecentCollection {
-                    key: format!("recent:{}:{group_path}", item.folder_id),
-                    folder_id: item.folder_id,
-                    name,
-                    relative_path: group_path,
-                    media_count: 0,
-                    latest_media_name: item.name.clone(),
-                    modified_at: item.modified_at,
-                });
-            collection.media_count += 1;
-            if item.modified_at > collection.modified_at {
-                collection.modified_at = item.modified_at;
-                collection.latest_media_name.clone_from(&item.name);
-            }
+            recent.extend(batch.into_iter().map(|item| RecentMediaItem {
+                key: format!("remote:{server_id}:{}", item.item_id),
+                source_kind: "remote".to_string(),
+                source_id: server_id,
+                source_name: server_name.clone(),
+                target_id: item.target_id,
+                target_name: item.target_name,
+                name: item.name,
+                context: item.context,
+                item_type: item.item_type,
+                updated_at: item.updated_at,
+            }));
         }
 
-        let mut collections = collections.into_values().collect::<Vec<_>>();
-        collections.sort_by(|left, right| {
+        recent.sort_by(|left, right| {
             right
-                .modified_at
-                .cmp(&left.modified_at)
+                .updated_at
+                .cmp(&left.updated_at)
                 .then_with(|| natural_cmp(&left.name, &right.name))
         });
-        collections.truncate(limit);
-        Ok(collections)
+        recent.truncate(limit);
+        Ok(recent)
     }
 
     pub fn list_media_servers(&self) -> AppResult<Vec<MediaServerSummary>> {

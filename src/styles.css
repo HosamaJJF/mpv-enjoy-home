@@ -9,7 +9,7 @@
     'Microsoft YaHei',
     sans-serif;
   color: #272338;
-  background: #f5f4f9;
+  background: #fff;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --accent: #6f4be8;
@@ -18,7 +18,7 @@
   --text: #272338;
   --muted: #777287;
   --faint: #aaa5b7;
-  --surface: rgba(255, 255, 255, 0.88);
+  --surface: #fff;
   --surface-solid: #fff;
   --line: rgba(47, 39, 72, 0.09);
   --shadow: 0 18px 55px rgba(45, 34, 83, 0.09);
@@ -57,54 +57,14 @@ select:focus-visible {
   grid-template-columns: 224px minmax(0, 1fr);
   width: 100%;
   height: 100%;
-  background:
-    radial-gradient(
-      circle at 76% -8%,
-      rgba(128, 97, 238, 0.12),
-      transparent 31%
-    ),
-    #f7f6fa;
+  background: #fff;
 }
 .sidebar {
   display: flex;
   flex-direction: column;
   padding: 28px 18px 22px;
-  background: rgba(250, 249, 252, 0.86);
+  background: #fff;
   border-right: 1px solid var(--line);
-  backdrop-filter: blur(22px);
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 0 10px 34px;
-}
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 13px;
-  color: white;
-  background: linear-gradient(145deg, #8a6cf4, #5a32c8);
-  box-shadow: 0 9px 23px rgba(100, 61, 212, 0.3);
-}
-.brand > div:last-child {
-  display: flex;
-  line-height: 1.05;
-  flex-direction: column;
-}
-.brand strong {
-  font-size: 15px;
-  letter-spacing: -0.02em;
-}
-.brand span {
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 nav {
   display: grid;
@@ -146,35 +106,8 @@ nav button em {
   font-style: normal;
   text-align: center;
 }
-nav button i {
-  width: 7px;
-  height: 7px;
-  margin-left: auto;
-  border-radius: 50%;
-  background: #d6a844;
-  box-shadow: 0 0 0 4px rgba(214, 168, 68, 0.12);
-}
-nav button i.ready {
-  background: #4caf7b;
-  box-shadow: 0 0 0 4px rgba(76, 175, 123, 0.12);
-}
-.sidebar-note {
-  display: flex;
-  gap: 10px;
-  margin-top: auto;
-  padding: 15px 13px;
-  border: 1px solid var(--line);
-  border-radius: 15px;
-  color: var(--accent-strong);
-  background: rgba(255, 255, 255, 0.64);
-}
-.sidebar-note p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.55;
-}
 .version {
+  margin-top: auto;
   padding: 16px 6px 0;
   color: var(--faint);
   font-size: 10px;
@@ -197,6 +130,9 @@ main {
 .page-header.compact {
   align-items: center;
   margin-bottom: 28px;
+}
+.page-header.library-header {
+  margin-bottom: 20px;
 }
 .eyebrow {
   display: block;
@@ -262,122 +198,14 @@ button.secondary:hover {
   background: #faf9ff;
 }
 .header-actions,
-.inline-actions,
 .empty-actions {
   display: flex;
   align-items: center;
   gap: 9px;
 }
 
-.hero {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(250px, 0.7fr);
-  min-height: 260px;
-  max-width: 1240px;
-  margin: 0 auto 38px;
-  overflow: hidden;
-  border-radius: 30px;
-  color: white;
-  background: linear-gradient(122deg, #2f244d, #51318f 56%, #7956e6);
-  box-shadow: 0 25px 60px rgba(60, 35, 112, 0.2);
-}
-.hero::after {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 28px 28px;
-  mask-image: linear-gradient(90deg, #000, transparent);
-  content: '';
-  pointer-events: none;
-}
-.hero-copy {
-  position: relative;
-  z-index: 2;
-  padding: 38px 42px;
-}
-.hero-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 25px;
-  padding: 7px 11px;
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 100px;
-  color: rgba(255, 255, 255, 0.8);
-  background: rgba(255, 255, 255, 0.07);
-  font-size: 11px;
-  font-weight: 700;
-}
-.hero h2 {
-  margin-bottom: 9px;
-  font-size: clamp(27px, 3vw, 38px);
-  letter-spacing: -0.04em;
-}
-.hero p {
-  margin-bottom: 30px;
-  color: rgba(255, 255, 255, 0.67);
-  font-size: 13px;
-}
-.hero-stats {
-  display: flex;
-  gap: 31px;
-}
-.hero-stats div {
-  display: flex;
-  flex-direction: column;
-}
-.hero-stats strong {
-  font-size: 19px;
-}
-.hero-stats span {
-  margin-top: 4px;
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-}
-.hero-stats strong.status-good {
-  color: #8ee0b2;
-}
-.hero-art {
-  position: relative;
-  min-height: 260px;
-}
-.orb {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(1px);
-}
-.orb-one {
-  width: 240px;
-  height: 240px;
-  top: -70px;
-  right: -25px;
-  background: rgba(255, 255, 255, 0.13);
-}
-.orb-two {
-  width: 150px;
-  height: 150px;
-  right: 120px;
-  bottom: -80px;
-  background: rgba(227, 204, 255, 0.13);
-}
-.play-tile {
-  position: absolute;
-  top: 50%;
-  right: 28%;
-  display: grid;
-  place-items: center;
-  width: 106px;
-  height: 106px;
-  transform: translateY(-50%) rotate(-7deg);
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 30px;
-  color: #6841d0;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 24px 55px rgba(34, 16, 72, 0.34);
+.header-actions.horizontal {
+  flex-direction: row;
 }
 
 .content-section {
@@ -829,6 +657,7 @@ button.secondary:hover {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-bottom: 16px;
 }
 .settings-title h2 {
   margin: 1px 0 0;
@@ -1048,6 +877,10 @@ button.secondary:hover {
   height: 42px;
   border-radius: 12px;
 }
+.recent-icon.remote {
+  color: #2c7893;
+  background: #e6f4f8;
+}
 .recent-copy strong {
   font-size: 12px;
 }
@@ -1062,38 +895,8 @@ button.secondary:hover {
   font-size: 9px;
 }
 
-.source-switcher {
-  display: flex;
-  max-width: 64%;
-  gap: 6px;
-  overflow: auto;
-  padding: 2px;
-}
-.source-switcher button {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 11px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.7);
-  font-size: 11px;
-  cursor: pointer;
-}
-.source-switcher button.active {
-  color: var(--accent-strong);
-  border-color: rgba(111, 75, 232, 0.22);
-  background: var(--accent-soft);
-  font-weight: 700;
-}
-.source-switcher span {
-  padding: 2px 5px;
-  border-radius: 6px;
-  color: var(--faint);
-  background: rgba(255, 255, 255, 0.72);
-  font-size: 9px;
+.source-picker-section {
+  margin-top: 4px;
 }
 .breadcrumbs {
   display: flex;
@@ -1104,6 +907,15 @@ button.secondary:hover {
   overflow: auto;
   color: var(--faint);
   white-space: nowrap;
+}
+.context-toolbar .breadcrumbs {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+}
+.context-toolbar .search-box {
+  flex: 0 1 300px;
+  width: 300px;
 }
 .breadcrumbs button {
   padding: 3px 5px;
@@ -1931,12 +1743,12 @@ button.secondary:hover {
 @media (prefers-color-scheme: dark) {
   :root {
     color: #eeebf5;
-    background: #17141e;
+    background: #181818;
     --text: #eeebf5;
     --muted: #a9a4b5;
     --faint: #777181;
-    --surface: rgba(37, 33, 46, 0.87);
-    --surface-solid: #29242f;
+    --surface: #232323;
+    --surface-solid: #292929;
     --line: rgba(255, 255, 255, 0.08);
     --accent: #a88ef6;
     --accent-strong: #b9a4ff;
@@ -1944,25 +1756,17 @@ button.secondary:hover {
     --shadow: 0 18px 55px rgba(0, 0, 0, 0.22);
   }
   .app-shell {
-    background:
-      radial-gradient(
-        circle at 76% -8%,
-        rgba(128, 97, 238, 0.12),
-        transparent 31%
-      ),
-      #1b1821;
+    background: #181818;
   }
   .sidebar {
-    background: rgba(27, 24, 33, 0.86);
+    background: #181818;
   }
   nav button.active,
   .folder-switcher button.active {
     background: rgba(127, 91, 229, 0.16);
   }
-  .sidebar-note,
   .folder-actions button,
   .folder-switcher button,
-  .source-switcher button,
   .source-actions button,
   .server-list button,
   .server-list > div {
@@ -1977,7 +1781,8 @@ button.secondary:hover {
     background: linear-gradient(145deg, #3a304e, #2d2739);
   }
   .server-card .source-icon,
-  .settings-icon.server-icon {
+  .settings-icon.server-icon,
+  .recent-icon.remote {
     color: #8ed4e7;
     background: linear-gradient(145deg, #273c45, #26343b);
   }

@@ -54,35 +54,39 @@ pub struct LibraryEntry {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RecentCollection {
+pub struct RecentMediaItem {
     pub key: String,
-    pub folder_id: i64,
+    pub source_kind: String,
+    pub source_id: i64,
+    pub source_name: String,
+    pub target_id: String,
+    pub target_name: String,
     pub name: String,
-    pub relative_path: String,
-    pub media_count: usize,
-    pub latest_media_name: String,
-    pub modified_at: i64,
+    pub context: String,
+    pub item_type: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoteRecentMedia {
+    pub item_id: String,
+    pub target_id: String,
+    pub target_name: String,
+    pub name: String,
+    pub context: String,
+    pub item_type: String,
+    pub updated_at: i64,
 }
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaServerInput {
     pub kind: String,
-    #[serde(default = "default_media_server_auth_mode")]
-    pub auth_mode: String,
     pub name: String,
     pub base_url: String,
+    pub username: String,
     #[serde(default)]
-    pub token: Option<String>,
-    pub user_id: Option<String>,
-    #[serde(default)]
-    pub username: Option<String>,
-    #[serde(default)]
-    pub password: Option<String>,
-}
-
-fn default_media_server_auth_mode() -> String {
-    "token".to_string()
+    pub password: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

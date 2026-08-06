@@ -28,7 +28,7 @@ pub fn run() {
             commands::remove_library_folder,
             commands::list_media,
             commands::list_library_entries,
-            commands::list_recent_collections,
+            commands::list_recent_media,
             commands::list_media_servers,
             commands::add_media_server,
             commands::remove_media_server,

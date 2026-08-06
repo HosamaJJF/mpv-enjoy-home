@@ -1,9 +1,10 @@
 use crate::domain::{
     MediaServerConfig, MediaServerInput, RemoteEpisodeDetail, RemoteLibraryEntry,
-    RemoteMediaDetail, RemotePersonDetail, RemoteSeasonDetail, natural_cmp,
+    RemoteMediaDetail, RemotePersonDetail, RemoteRecentMedia, RemoteSeasonDetail, natural_cmp,
 };
 use crate::error::{AppError, AppResult};
 use base64::Engine;
+use chrono::DateTime;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::de::DeserializeOwned;
@@ -140,6 +141,7 @@ struct BaseItem {
     parent_index_number: Option<i32>,
     series_name: Option<String>,
     series_id: Option<String>,
+    date_created: Option<String>,
     production_year: Option<i32>,
     premiere_date: Option<String>,
     run_time_ticks: Option<i64>,
@@ -234,24 +236,15 @@ struct MediaStream {
 impl RemoteClient {
     pub fn verify(input: &MediaServerInput) -> AppResult<VerifiedServer> {
         let kind = normalize_kind(&input.kind)?;
-        let auth_mode = normalize_auth_mode(&input.auth_mode)?;
         let base_url = normalize_base_url(&input.base_url)?;
         let mut remote = Self::build(&kind, &base_url, "", "")?;
-        let (token, user) = if auth_mode == "password" {
-            let username = normalize_username(input.username.as_deref().unwrap_or_default())?;
-            let password = normalize_password(input.password.as_deref().unwrap_or_default())?;
-            let result = remote
-                .authenticate_by_name(&username, &password)
-                .map_err(|error| contextual_error("用户名和密码登录失败", error))?;
-            (normalize_token(&result.access_token)?, result.user)
-        } else {
-            let token = normalize_token(input.token.as_deref().unwrap_or_default())?;
-            remote.token.clone_from(&token);
-            let user = remote
-                .resolve_user(input.user_id.as_deref())
-                .map_err(|error| contextual_error("识别令牌对应用户失败", error))?;
-            (token, user)
-        };
+        let username = normalize_username(&input.username)?;
+        let password = normalize_password(&input.password)?;
+        let result = remote
+            .authenticate_by_name(&username, &password)
+            .map_err(|error| contextual_error("用户名和密码登录失败", error))?;
+        let token = normalize_token(&result.access_token)?;
+        let user = result.user;
 
         remote.token.clone_from(&token);
         remote.user_id.clone_from(&user.id);
@@ -327,6 +320,27 @@ impl RemoteClient {
             .collect::<Vec<_>>();
         sort_remote_items(&mut items);
         Ok(items.into_iter().map(to_library_entry).collect())
+    }
+
+    pub fn list_recent_media(&self, limit: usize) -> AppResult<Vec<RemoteRecentMedia>> {
+        let limit = limit.clamp(1, 24).to_string();
+        let query = [
+            ("Recursive", "true"),
+            ("IncludeItemTypes", "Episode,Movie,Video"),
+            (
+                "Fields",
+                "DateCreated,SeriesName,SeriesId,IndexNumber,ParentIndexNumber",
+            ),
+            ("SortBy", "DateCreated"),
+            ("SortOrder", "Descending"),
+            ("EnableImages", "false"),
+            ("Limit", limit.as_str()),
+        ];
+        let items = self
+            .get_json::<QueryResult>(&["Users", &self.user_id, "Items"], &query)?
+            .items;
+
+        Ok(items.into_iter().filter_map(remote_recent_media).collect())
     }
 
     pub fn media_detail(&self, item_id: &str) -> AppResult<RemoteMediaDetail> {
@@ -650,28 +664,6 @@ impl RemoteClient {
             .map_err(|error| remote_error("登录响应格式无法识别", error))
     }
 
-    fn resolve_user(&self, requested_id: Option<&str>) -> AppResult<RemoteUser> {
-        if let Some(user_id) = requested_id
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            validate_identifier(user_id, "用户 ID")?;
-            return self.get_json(&["Users", user_id], &[]);
-        }
-
-        if let Some(user) = self.get_json_optional::<RemoteUser>(&["Users", "Me"], &[])? {
-            return Ok(user);
-        }
-        let users: Vec<RemoteUser> = self.get_json(&["Users"], &[])?;
-        match users.len() {
-            0 => Err(AppError::message("服务器没有返回可用用户，请填写用户 ID")),
-            1 => Ok(users.into_iter().next().expect("length checked")),
-            _ => Err(AppError::message(
-                "服务器包含多个用户，请在连接设置中填写用户 ID",
-            )),
-        }
-    }
-
     fn get_json<T: DeserializeOwned>(
         &self,
         segments: &[&str],
@@ -680,24 +672,6 @@ impl RemoteClient {
         let response = ensure_success(self.send_get(segments, query)?)?;
         response
             .json()
-            .map_err(|error| remote_error("媒体服务器返回了无法识别的数据", error))
-    }
-
-    fn get_json_optional<T: DeserializeOwned>(
-        &self,
-        segments: &[&str],
-        query: &[(&str, &str)],
-    ) -> AppResult<Option<T>> {
-        let response = self.send_get(segments, query)?;
-        // Some Emby releases return HTTP 500 for /Users/Me when an API key is
-        // not bound to a user. This endpoint is only a best-effort shortcut;
-        // any non-success response must fall back to the explicit user list.
-        if !response.status().is_success() {
-            return Ok(None);
-        }
-        response
-            .json()
-            .map(Some)
             .map_err(|error| remote_error("媒体服务器返回了无法识别的数据", error))
     }
 
@@ -864,15 +838,6 @@ fn normalize_kind(value: &str) -> AppResult<String> {
     }
 }
 
-fn normalize_auth_mode(value: &str) -> AppResult<String> {
-    let mode = value.trim().to_ascii_lowercase();
-    if matches!(mode.as_str(), "password" | "token") {
-        Ok(mode)
-    } else {
-        Err(AppError::message("媒体服务器登录方式无效"))
-    }
-}
-
 fn normalize_username(value: &str) -> AppResult<String> {
     let username = value.trim();
     if username.is_empty() || username.len() > 256 || username.chars().any(char::is_control) {
@@ -960,6 +925,49 @@ fn playback_title(item: &BaseItem) -> String {
     } else {
         item.name.clone()
     }
+}
+
+fn remote_recent_media(item: BaseItem) -> Option<RemoteRecentMedia> {
+    let updated_at = item
+        .date_created
+        .as_deref()
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.timestamp())
+        .unwrap_or_default();
+    let (target_id, target_name, context) = if item.item_type == "Episode" {
+        let target_id = item.series_id.clone()?;
+        let target_name = item
+            .series_name
+            .clone()
+            .unwrap_or_else(|| item.name.clone());
+        let episode = match (item.parent_index_number, item.index_number) {
+            (Some(season), Some(episode)) => format!("S{season:02}E{episode:02}"),
+            (_, Some(episode)) => format!("E{episode:02}"),
+            _ => "单集".to_string(),
+        };
+        (
+            target_id,
+            target_name.clone(),
+            format!("{target_name} · {episode}"),
+        )
+    } else {
+        let context = if item.item_type == "Movie" {
+            "电影"
+        } else {
+            "视频"
+        };
+        (item.id.clone(), item.name.clone(), context.to_string())
+    };
+
+    Some(RemoteRecentMedia {
+        item_id: item.id,
+        target_id,
+        target_name,
+        name: item.name,
+        context,
+        item_type: item.item_type,
+        updated_at,
+    })
 }
 
 fn sort_remote_items(items: &mut [BaseItem]) {
@@ -1334,12 +1342,32 @@ mod tests {
 
     #[test]
     fn validates_login_fields_without_requiring_a_password() {
-        assert_eq!(normalize_auth_mode(" password ").unwrap(), "password");
         assert_eq!(normalize_username(" media-user ").unwrap(), "media-user");
         assert_eq!(normalize_password("").unwrap(), "");
         assert!(normalize_username("\n").is_err());
-        assert!(normalize_auth_mode("basic").is_err());
         assert!(validate_identifier("bad\"user", "用户 ID").is_err());
+    }
+
+    #[test]
+    fn maps_recent_episode_to_its_series_detail() {
+        let recent = remote_recent_media(BaseItem {
+            id: "episode-id".to_string(),
+            name: "新的单集".to_string(),
+            item_type: "Episode".to_string(),
+            series_id: Some("series-id".to_string()),
+            series_name: Some("示例剧集".to_string()),
+            parent_index_number: Some(2),
+            index_number: Some(3),
+            date_created: Some("2026-08-06T12:30:00Z".to_string()),
+            ..BaseItem::default()
+        })
+        .unwrap();
+
+        assert_eq!(recent.item_id, "episode-id");
+        assert_eq!(recent.target_id, "series-id");
+        assert_eq!(recent.target_name, "示例剧集");
+        assert_eq!(recent.context, "示例剧集 · S02E03");
+        assert_eq!(recent.updated_at, 1_786_019_400);
     }
 
     #[test]
