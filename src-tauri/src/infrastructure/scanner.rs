@@ -48,6 +48,13 @@ pub fn scan_media(root: &Path) -> AppResult<Vec<DiscoveredMedia>> {
                 .file_name()
                 .map(|value| value.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.to_string_lossy().into_owned());
+            let relative_path = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
             let modified_at = metadata
                 .modified()
                 .unwrap_or(SystemTime::UNIX_EPOCH)
@@ -57,6 +64,7 @@ pub fn scan_media(root: &Path) -> AppResult<Vec<DiscoveredMedia>> {
             media.push(DiscoveredMedia {
                 name,
                 path,
+                relative_path,
                 extension,
                 modified_at,
             });

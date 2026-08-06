@@ -1,10 +1,12 @@
-use crate::domain::{DiscoveredMedia, FolderSummary, MediaItem, natural_cmp};
+use crate::domain::{
+    DiscoveredMedia, FolderSummary, MediaItem, MediaServerConfig, MediaServerSummary, natural_cmp,
+};
 use crate::error::{AppError, AppResult};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -40,6 +42,7 @@ impl Database {
                      folder_id INTEGER NOT NULL REFERENCES library_folders(id) ON DELETE CASCADE,
                      name TEXT NOT NULL,
                      path TEXT NOT NULL UNIQUE,
+                     relative_path TEXT NOT NULL,
                      extension TEXT NOT NULL,
                      modified_at INTEGER NOT NULL
                  );
@@ -49,7 +52,41 @@ impl Database {
                      key TEXT PRIMARY KEY,
                      value TEXT NOT NULL
                  );
-                 PRAGMA user_version = 1;
+                 CREATE TABLE media_servers (
+                     id INTEGER PRIMARY KEY,
+                     kind TEXT NOT NULL,
+                     name TEXT NOT NULL,
+                     base_url TEXT NOT NULL,
+                     token TEXT NOT NULL,
+                     user_id TEXT NOT NULL,
+                     user_name TEXT NOT NULL,
+                     server_version TEXT,
+                     added_at INTEGER NOT NULL,
+                     last_connected_at INTEGER,
+                     UNIQUE(kind, base_url, user_id)
+                 );
+                 PRAGMA user_version = 2;
+                 COMMIT;",
+            )?;
+        }
+        if version == 1 {
+            connection.execute_batch(
+                "BEGIN;
+                 ALTER TABLE media_items ADD COLUMN relative_path TEXT NOT NULL DEFAULT '';
+                 CREATE TABLE media_servers (
+                     id INTEGER PRIMARY KEY,
+                     kind TEXT NOT NULL,
+                     name TEXT NOT NULL,
+                     base_url TEXT NOT NULL,
+                     token TEXT NOT NULL,
+                     user_id TEXT NOT NULL,
+                     user_name TEXT NOT NULL,
+                     server_version TEXT,
+                     added_at INTEGER NOT NULL,
+                     last_connected_at INTEGER,
+                     UNIQUE(kind, base_url, user_id)
+                 );
+                 PRAGMA user_version = 2;
                  COMMIT;",
             )?;
         }
@@ -115,14 +152,16 @@ impl Database {
         transaction.execute("DELETE FROM media_items WHERE folder_id = ?1", [folder_id])?;
         {
             let mut insert = transaction.prepare(
-                "INSERT INTO media_items(folder_id, name, path, extension, modified_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO media_items(
+                     folder_id, name, path, relative_path, extension, modified_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )?;
             for media in discovered {
                 insert.execute(params![
                     folder_id,
                     media.name,
                     media.path.to_string_lossy(),
+                    media.relative_path,
                     media.extension,
                     media.modified_at,
                 ])?;
@@ -178,7 +217,7 @@ impl Database {
         let query = query.unwrap_or("").trim();
         let like = format!("%{query}%");
         let mut statement = connection.prepare(
-            "SELECT id, folder_id, name, path, extension, modified_at
+            "SELECT id, folder_id, name, path, relative_path, extension, modified_at
              FROM media_items
              WHERE (?1 IS NULL OR folder_id = ?1)
                AND (?2 = '' OR name LIKE ?3)
@@ -192,8 +231,9 @@ impl Database {
                     folder_id: row.get(1)?,
                     name: row.get(2)?,
                     path: row.get(3)?,
-                    extension: row.get(4)?,
-                    modified_at: row.get(5)?,
+                    relative_path: row.get(4)?,
+                    extension: row.get(5)?,
+                    modified_at: row.get(6)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -203,16 +243,71 @@ impl Database {
         Ok(media)
     }
 
-    pub fn media_path(&self, media_id: i64) -> AppResult<PathBuf> {
+    pub fn list_all_media(&self) -> AppResult<Vec<MediaItem>> {
+        let connection = self.open()?;
+        let mut statement = connection.prepare(
+            "SELECT id, folder_id, name, path, relative_path, extension, modified_at
+             FROM media_items ORDER BY modified_at DESC, id DESC",
+        )?;
+        let media = statement
+            .query_map([], |row| {
+                Ok(MediaItem {
+                    id: row.get(0)?,
+                    folder_id: row.get(1)?,
+                    name: row.get(2)?,
+                    path: row.get(3)?,
+                    relative_path: row.get(4)?,
+                    extension: row.get(5)?,
+                    modified_at: row.get(6)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(media)
+    }
+
+    pub fn list_folder_media(&self, folder_id: i64) -> AppResult<Vec<MediaItem>> {
+        let connection = self.open()?;
+        let mut statement = connection.prepare(
+            "SELECT id, folder_id, name, path, relative_path, extension, modified_at
+             FROM media_items WHERE folder_id = ?1",
+        )?;
+        let mut media = statement
+            .query_map([folder_id], |row| {
+                Ok(MediaItem {
+                    id: row.get(0)?,
+                    folder_id: row.get(1)?,
+                    name: row.get(2)?,
+                    path: row.get(3)?,
+                    relative_path: row.get(4)?,
+                    extension: row.get(5)?,
+                    modified_at: row.get(6)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        media.sort_by(|left, right| natural_cmp(&left.name, &right.name));
+        Ok(media)
+    }
+
+    pub fn media_item(&self, media_id: i64) -> AppResult<MediaItem> {
         let connection = self.open()?;
         connection
             .query_row(
-                "SELECT path FROM media_items WHERE id = ?1",
+                "SELECT id, folder_id, name, path, relative_path, extension, modified_at
+                 FROM media_items WHERE id = ?1",
                 [media_id],
-                |row| row.get::<_, String>(0),
+                |row| {
+                    Ok(MediaItem {
+                        id: row.get(0)?,
+                        folder_id: row.get(1)?,
+                        name: row.get(2)?,
+                        path: row.get(3)?,
+                        relative_path: row.get(4)?,
+                        extension: row.get(5)?,
+                        modified_at: row.get(6)?,
+                    })
+                },
             )
             .optional()?
-            .map(PathBuf::from)
             .ok_or_else(|| AppError::message("媒体条目不存在"))
     }
 
@@ -239,6 +334,119 @@ impl Database {
         }
         Ok(())
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_media_server(
+        &self,
+        kind: &str,
+        name: &str,
+        base_url: &str,
+        token: &str,
+        user_id: &str,
+        user_name: &str,
+        server_version: Option<&str>,
+    ) -> AppResult<MediaServerSummary> {
+        let connection = self.open()?;
+        let now = now_timestamp();
+        connection.execute(
+            "INSERT INTO media_servers(
+                 kind, name, base_url, token, user_id, user_name,
+                 server_version, added_at, last_connected_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+             ON CONFLICT(kind, base_url, user_id) DO UPDATE SET
+                 name = excluded.name,
+                 token = excluded.token,
+                 user_name = excluded.user_name,
+                 server_version = excluded.server_version,
+                 last_connected_at = excluded.last_connected_at",
+            params![
+                kind,
+                name,
+                base_url,
+                token,
+                user_id,
+                user_name,
+                server_version,
+                now
+            ],
+        )?;
+        let id = connection.query_row(
+            "SELECT id FROM media_servers
+             WHERE kind = ?1 AND base_url = ?2 AND user_id = ?3",
+            params![kind, base_url, user_id],
+            |row| row.get(0),
+        )?;
+        self.media_server(id).map(Into::into)
+    }
+
+    pub fn list_media_servers(&self) -> AppResult<Vec<MediaServerSummary>> {
+        let connection = self.open()?;
+        let mut statement = connection.prepare(
+            "SELECT id, kind, name, base_url, user_id, user_name,
+                    server_version, added_at, last_connected_at
+             FROM media_servers ORDER BY name COLLATE NOCASE, id",
+        )?;
+        let servers = statement
+            .query_map([], |row| {
+                Ok(MediaServerSummary {
+                    id: row.get(0)?,
+                    kind: row.get(1)?,
+                    name: row.get(2)?,
+                    base_url: row.get(3)?,
+                    user_id: row.get(4)?,
+                    user_name: row.get(5)?,
+                    server_version: row.get(6)?,
+                    added_at: row.get(7)?,
+                    last_connected_at: row.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(servers)
+    }
+
+    pub fn media_server(&self, server_id: i64) -> AppResult<MediaServerConfig> {
+        let connection = self.open()?;
+        connection
+            .query_row(
+                "SELECT id, kind, name, base_url, token, user_id, user_name,
+                        server_version, added_at, last_connected_at
+                 FROM media_servers WHERE id = ?1",
+                [server_id],
+                |row| {
+                    Ok(MediaServerConfig {
+                        id: row.get(0)?,
+                        kind: row.get(1)?,
+                        name: row.get(2)?,
+                        base_url: row.get(3)?,
+                        token: row.get(4)?,
+                        user_id: row.get(5)?,
+                        user_name: row.get(6)?,
+                        server_version: row.get(7)?,
+                        added_at: row.get(8)?,
+                        last_connected_at: row.get(9)?,
+                    })
+                },
+            )
+            .optional()?
+            .ok_or_else(|| AppError::message("媒体服务器不存在"))
+    }
+
+    pub fn mark_media_server_connected(&self, server_id: i64) -> AppResult<()> {
+        let connection = self.open()?;
+        connection.execute(
+            "UPDATE media_servers SET last_connected_at = ?1 WHERE id = ?2",
+            params![now_timestamp(), server_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_media_server(&self, server_id: i64) -> AppResult<()> {
+        let connection = self.open()?;
+        if connection.execute("DELETE FROM media_servers WHERE id = ?1", [server_id])? == 0 {
+            return Err(AppError::message("媒体服务器不存在"));
+        }
+        Ok(())
+    }
 }
 
 fn now_timestamp() -> i64 {
@@ -246,4 +454,72 @@ fn now_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrates_v1_without_dropping_existing_media() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mpv-enjoy-home-migration-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE library_folders (
+                         id INTEGER PRIMARY KEY,
+                         name TEXT NOT NULL,
+                         path TEXT NOT NULL UNIQUE,
+                         media_count INTEGER NOT NULL DEFAULT 0,
+                         added_at INTEGER NOT NULL,
+                         last_scanned_at INTEGER
+                     );
+                     CREATE TABLE media_items (
+                         id INTEGER PRIMARY KEY,
+                         folder_id INTEGER NOT NULL REFERENCES library_folders(id),
+                         name TEXT NOT NULL,
+                         path TEXT NOT NULL UNIQUE,
+                         extension TEXT NOT NULL,
+                         modified_at INTEGER NOT NULL
+                     );
+                     CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                     INSERT INTO library_folders(id, name, path, added_at)
+                     VALUES (1, 'Anime', '/media/anime', 1);
+                     INSERT INTO media_items(
+                         id, folder_id, name, path, extension, modified_at
+                     ) VALUES (1, 1, 'episode.mkv', '/media/anime/episode.mkv', 'mkv', 1);
+                     PRAGMA user_version = 1;",
+                )
+                .unwrap();
+        }
+
+        let database = Database::new(path.clone());
+        database.initialize().unwrap();
+        let media = database.list_all_media().unwrap();
+        assert_eq!(media.len(), 1);
+        assert_eq!(media[0].relative_path, "");
+        assert!(database.list_media_servers().unwrap().is_empty());
+        let connection = Connection::open(&path).unwrap();
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        drop(connection);
+
+        for candidate in [
+            path.clone(),
+            PathBuf::from(format!("{}-wal", path.display())),
+            PathBuf::from(format!("{}-shm", path.display())),
+        ] {
+            let _ = std::fs::remove_file(candidate);
+        }
+    }
 }

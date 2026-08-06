@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::path::PathBuf;
 
@@ -25,6 +25,7 @@ pub struct MediaItem {
     pub folder_id: i64,
     pub name: String,
     pub path: String,
+    pub relative_path: String,
     pub extension: String,
     pub modified_at: i64,
 }
@@ -33,8 +34,178 @@ pub struct MediaItem {
 pub struct DiscoveredMedia {
     pub name: String,
     pub path: PathBuf,
+    pub relative_path: String,
     pub extension: String,
     pub modified_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryEntry {
+    pub key: String,
+    pub name: String,
+    pub relative_path: String,
+    pub kind: String,
+    pub media_id: Option<i64>,
+    pub extension: Option<String>,
+    pub modified_at: i64,
+    pub media_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentCollection {
+    pub key: String,
+    pub folder_id: i64,
+    pub name: String,
+    pub relative_path: String,
+    pub media_count: usize,
+    pub latest_media_name: String,
+    pub modified_at: i64,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaServerInput {
+    pub kind: String,
+    #[serde(default = "default_media_server_auth_mode")]
+    pub auth_mode: String,
+    pub name: String,
+    pub base_url: String,
+    #[serde(default)]
+    pub token: Option<String>,
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+fn default_media_server_auth_mode() -> String {
+    "token".to_string()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaServerSummary {
+    pub id: i64,
+    pub kind: String,
+    pub name: String,
+    pub base_url: String,
+    pub user_id: String,
+    pub user_name: String,
+    pub server_version: Option<String>,
+    pub added_at: i64,
+    pub last_connected_at: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaServerConfig {
+    pub id: i64,
+    pub kind: String,
+    pub name: String,
+    pub base_url: String,
+    pub token: String,
+    pub user_id: String,
+    pub user_name: String,
+    pub server_version: Option<String>,
+    pub added_at: i64,
+    pub last_connected_at: Option<i64>,
+}
+
+impl From<MediaServerConfig> for MediaServerSummary {
+    fn from(server: MediaServerConfig) -> Self {
+        Self {
+            id: server.id,
+            kind: server.kind,
+            name: server.name,
+            base_url: server.base_url,
+            user_id: server.user_id,
+            user_name: server.user_name,
+            server_version: server.server_version,
+            added_at: server.added_at,
+            last_connected_at: server.last_connected_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteLibraryEntry {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub item_type: String,
+    pub subtitle: Option<String>,
+    pub child_count: usize,
+    pub has_image: bool,
+    pub image_aspect_ratio: Option<f64>,
+    pub index_number: Option<i32>,
+    pub parent_index_number: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteMediaDetail {
+    pub id: String,
+    pub name: String,
+    pub item_type: String,
+    pub overview: Option<String>,
+    pub tagline: Option<String>,
+    pub genres: Vec<String>,
+    pub production_year: Option<i32>,
+    pub premiere_date: Option<String>,
+    pub runtime_ticks: Option<i64>,
+    pub community_rating: Option<f64>,
+    pub official_rating: Option<String>,
+    pub played: bool,
+    pub playback_position_ticks: i64,
+    pub played_percentage: Option<f64>,
+    pub primary_image_id: Option<String>,
+    pub backdrop_image_id: Option<String>,
+    pub seasons: Vec<RemoteSeasonDetail>,
+    pub episodes: Vec<RemoteEpisodeDetail>,
+    pub people: Vec<RemotePersonDetail>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteSeasonDetail {
+    pub id: String,
+    pub name: String,
+    pub index_number: Option<i32>,
+    pub overview: Option<String>,
+    pub episode_count: usize,
+    pub unplayed_count: Option<usize>,
+    pub played: bool,
+    pub primary_image_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteEpisodeDetail {
+    pub id: String,
+    pub name: String,
+    pub overview: Option<String>,
+    pub index_number: Option<i32>,
+    pub parent_index_number: Option<i32>,
+    pub season_id: Option<String>,
+    pub premiere_date: Option<String>,
+    pub runtime_ticks: Option<i64>,
+    pub played: bool,
+    pub playback_position_ticks: i64,
+    pub played_percentage: Option<f64>,
+    pub primary_image_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemotePersonDetail {
+    pub id: Option<String>,
+    pub name: String,
+    pub role: Option<String>,
+    pub person_type: Option<String>,
+    pub primary_image_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

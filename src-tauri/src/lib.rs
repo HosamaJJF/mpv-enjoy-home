@@ -27,9 +27,18 @@ pub fn run() {
             commands::rescan_library_folder,
             commands::remove_library_folder,
             commands::list_media,
+            commands::list_library_entries,
+            commands::list_recent_collections,
+            commands::list_media_servers,
+            commands::add_media_server,
+            commands::remove_media_server,
+            commands::list_remote_entries,
+            commands::get_remote_image,
+            commands::get_remote_media_detail,
             commands::get_player_status,
             commands::set_player_executable,
             commands::play_media,
+            commands::play_remote_media,
         ])
         .run(tauri::generate_context!())
         .expect("error while running mpv-enjoy Home");

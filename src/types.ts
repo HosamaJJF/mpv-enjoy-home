@@ -12,8 +12,122 @@ export interface MediaItem {
   folderId: number;
   name: string;
   path: string;
+  relativePath: string;
   extension: string;
   modifiedAt: number;
+}
+
+export interface LibraryEntry {
+  key: string;
+  name: string;
+  relativePath: string;
+  kind: 'folder' | 'video';
+  mediaId: number | null;
+  extension: string | null;
+  modifiedAt: number;
+  mediaCount: number;
+}
+
+export interface RecentCollection {
+  key: string;
+  folderId: number;
+  name: string;
+  relativePath: string;
+  mediaCount: number;
+  latestMediaName: string;
+  modifiedAt: number;
+}
+
+export interface MediaServerInput {
+  kind: 'emby' | 'jellyfin';
+  authMode: 'password' | 'token';
+  name: string;
+  baseUrl: string;
+  token: string;
+  userId?: string;
+  username: string;
+  password: string;
+}
+
+export interface MediaServerSummary {
+  id: number;
+  kind: 'emby' | 'jellyfin';
+  name: string;
+  baseUrl: string;
+  userId: string;
+  userName: string;
+  serverVersion: string | null;
+  addedAt: number;
+  lastConnectedAt: number | null;
+}
+
+export interface RemoteLibraryEntry {
+  id: string;
+  name: string;
+  kind: 'collection' | 'detail';
+  itemType: string;
+  subtitle: string | null;
+  childCount: number;
+  hasImage: boolean;
+  imageAspectRatio: number | null;
+  indexNumber: number | null;
+  parentIndexNumber: number | null;
+}
+
+export interface RemoteMediaDetail {
+  id: string;
+  name: string;
+  itemType: 'Series' | 'Movie' | 'Video' | string;
+  overview: string | null;
+  tagline: string | null;
+  genres: string[];
+  productionYear: number | null;
+  premiereDate: string | null;
+  runtimeTicks: number | null;
+  communityRating: number | null;
+  officialRating: string | null;
+  played: boolean;
+  playbackPositionTicks: number;
+  playedPercentage: number | null;
+  primaryImageId: string | null;
+  backdropImageId: string | null;
+  seasons: RemoteSeasonDetail[];
+  episodes: RemoteEpisodeDetail[];
+  people: RemotePersonDetail[];
+}
+
+export interface RemoteSeasonDetail {
+  id: string;
+  name: string;
+  indexNumber: number | null;
+  overview: string | null;
+  episodeCount: number;
+  unplayedCount: number | null;
+  played: boolean;
+  primaryImageId: string | null;
+}
+
+export interface RemoteEpisodeDetail {
+  id: string;
+  name: string;
+  overview: string | null;
+  indexNumber: number | null;
+  parentIndexNumber: number | null;
+  seasonId: string | null;
+  premiereDate: string | null;
+  runtimeTicks: number | null;
+  played: boolean;
+  playbackPositionTicks: number;
+  playedPercentage: number | null;
+  primaryImageId: string | null;
+}
+
+export interface RemotePersonDetail {
+  id: string | null;
+  name: string;
+  role: string | null;
+  personType: string | null;
+  primaryImageId: string | null;
 }
 
 export interface PlayerStatus {

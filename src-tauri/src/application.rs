@@ -1,11 +1,16 @@
-use crate::domain::{FolderSummary, MediaItem, PlayerStatus};
+use crate::domain::{
+    FolderSummary, LibraryEntry, MediaItem, MediaServerInput, MediaServerSummary, PlayerStatus,
+    RecentCollection, RemoteLibraryEntry, RemoteMediaDetail, natural_cmp,
+};
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::database::Database;
 use crate::infrastructure::player::{
     PLAYER_SETTING, PlayerBackend, ProcessPlayerBackend, normalize_selected_player,
 };
+use crate::infrastructure::remote::RemoteClient;
 use crate::infrastructure::scanner::scan_media;
-use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct AppService {
@@ -59,6 +64,172 @@ impl AppService {
         self.database.list_media(folder_id, query, limit)
     }
 
+    pub fn list_library_entries(
+        &self,
+        folder_id: i64,
+        parent: Option<&str>,
+        query: Option<&str>,
+    ) -> AppResult<Vec<LibraryEntry>> {
+        let folder = self.database.folder(folder_id)?;
+        let parent = normalize_relative_path(parent.unwrap_or(""))?;
+        let search = query.unwrap_or("").trim().to_lowercase();
+        let items = self.database.list_folder_media(folder_id)?;
+        let mut entries = Vec::new();
+        let mut directories: HashMap<String, LibraryEntry> = HashMap::new();
+
+        for item in items {
+            let relative_path = media_relative_path(&folder, &item);
+            let Some(remainder) = strip_parent(&relative_path, &parent) else {
+                continue;
+            };
+            if !search.is_empty() {
+                if item.name.to_lowercase().contains(&search) {
+                    entries.push(video_entry(item, relative_path));
+                }
+                continue;
+            }
+
+            if let Some((directory, _)) = remainder.split_once('/') {
+                let path = join_relative(&parent, directory);
+                let entry = directories
+                    .entry(path.clone())
+                    .or_insert_with(|| LibraryEntry {
+                        key: format!("folder:{folder_id}:{path}"),
+                        name: directory.to_string(),
+                        relative_path: path,
+                        kind: "folder".to_string(),
+                        media_id: None,
+                        extension: None,
+                        modified_at: item.modified_at,
+                        media_count: 0,
+                    });
+                entry.media_count += 1;
+                entry.modified_at = entry.modified_at.max(item.modified_at);
+            } else {
+                entries.push(video_entry(item, relative_path));
+            }
+        }
+
+        entries.extend(directories.into_values());
+        entries.sort_by(|left, right| {
+            left.kind
+                .cmp(&right.kind)
+                .then_with(|| natural_cmp(&left.name, &right.name))
+        });
+        Ok(entries)
+    }
+
+    pub fn list_recent_collections(&self, limit: usize) -> AppResult<Vec<RecentCollection>> {
+        let folders = self.database.list_folders()?;
+        let folder_names = folders
+            .iter()
+            .map(|folder| (folder.id, folder.name.clone()))
+            .collect::<HashMap<_, _>>();
+        let folder_paths = folders
+            .iter()
+            .map(|folder| (folder.id, folder.clone()))
+            .collect::<HashMap<_, _>>();
+        let mut collections: HashMap<(i64, String), RecentCollection> = HashMap::new();
+
+        for item in self.database.list_all_media()? {
+            let Some(folder) = folder_paths.get(&item.folder_id) else {
+                continue;
+            };
+            let relative_path = media_relative_path(folder, &item);
+            let group_path = relative_path
+                .split_once('/')
+                .map(|(directory, _)| directory)
+                .unwrap_or("")
+                .to_string();
+            let name = if group_path.is_empty() {
+                folder_names
+                    .get(&item.folder_id)
+                    .cloned()
+                    .unwrap_or_else(|| "媒体目录".to_string())
+            } else {
+                group_path.clone()
+            };
+            let collection = collections
+                .entry((item.folder_id, group_path.clone()))
+                .or_insert_with(|| RecentCollection {
+                    key: format!("recent:{}:{group_path}", item.folder_id),
+                    folder_id: item.folder_id,
+                    name,
+                    relative_path: group_path,
+                    media_count: 0,
+                    latest_media_name: item.name.clone(),
+                    modified_at: item.modified_at,
+                });
+            collection.media_count += 1;
+            if item.modified_at > collection.modified_at {
+                collection.modified_at = item.modified_at;
+                collection.latest_media_name.clone_from(&item.name);
+            }
+        }
+
+        let mut collections = collections.into_values().collect::<Vec<_>>();
+        collections.sort_by(|left, right| {
+            right
+                .modified_at
+                .cmp(&left.modified_at)
+                .then_with(|| natural_cmp(&left.name, &right.name))
+        });
+        collections.truncate(limit);
+        Ok(collections)
+    }
+
+    pub fn list_media_servers(&self) -> AppResult<Vec<MediaServerSummary>> {
+        self.database.list_media_servers()
+    }
+
+    pub fn add_media_server(&self, input: &MediaServerInput) -> AppResult<MediaServerSummary> {
+        let server = RemoteClient::verify(input)?;
+        self.database.save_media_server(
+            &server.kind,
+            &server.name,
+            &server.base_url,
+            &server.token,
+            &server.user_id,
+            &server.user_name,
+            server.server_version.as_deref(),
+        )
+    }
+
+    pub fn remove_media_server(&self, server_id: i64) -> AppResult<()> {
+        self.database.remove_media_server(server_id)
+    }
+
+    pub fn list_remote_entries(
+        &self,
+        server_id: i64,
+        parent_id: Option<&str>,
+    ) -> AppResult<Vec<RemoteLibraryEntry>> {
+        let server = self.database.media_server(server_id)?;
+        let entries = RemoteClient::from_config(&server)?.list_entries(parent_id)?;
+        self.database.mark_media_server_connected(server_id)?;
+        Ok(entries)
+    }
+
+    pub fn remote_media_detail(
+        &self,
+        server_id: i64,
+        item_id: &str,
+    ) -> AppResult<RemoteMediaDetail> {
+        let server = self.database.media_server(server_id)?;
+        RemoteClient::from_config(&server)?.media_detail(item_id)
+    }
+
+    pub fn remote_image(
+        &self,
+        server_id: i64,
+        item_id: &str,
+        image_type: &str,
+        max_width: u32,
+    ) -> AppResult<Option<String>> {
+        let server = self.database.media_server(server_id)?;
+        RemoteClient::from_config(&server)?.image_data_url(item_id, image_type, max_width)
+    }
+
     pub fn player_status(&self) -> AppResult<PlayerStatus> {
         let configured = self.database.setting(PLAYER_SETTING)?;
         Ok(ProcessPlayerBackend.status(configured.as_deref()))
@@ -77,8 +248,113 @@ impl AppService {
     }
 
     pub fn play_media(&self, media_id: i64) -> AppResult<()> {
-        let media = self.database.media_path(media_id)?;
+        let selected = self.database.media_item(media_id)?;
+        let selected_path = Path::new(&selected.path);
+        let selected_parent = selected_path.parent();
+        let queue = self
+            .database
+            .list_folder_media(selected.folder_id)?
+            .into_iter()
+            .filter(|item| Path::new(&item.path).parent() == selected_parent)
+            .collect::<Vec<_>>();
+        let start_index = queue
+            .iter()
+            .position(|item| item.id == selected.id)
+            .ok_or_else(|| AppError::message("媒体条目未出现在所属目录的播放列表中"))?;
+        let media = queue
+            .into_iter()
+            .map(|item| PathBuf::from(item.path))
+            .collect::<Vec<_>>();
         let configured = self.database.setting(PLAYER_SETTING)?;
-        ProcessPlayerBackend.play(configured.as_deref(), &media)
+        ProcessPlayerBackend.play_local(configured.as_deref(), &media, start_index)
+    }
+
+    pub fn play_remote_media(&self, server_id: i64, item_id: &str) -> AppResult<()> {
+        let server = self.database.media_server(server_id)?;
+        let playback = RemoteClient::from_config(&server)?.playback(item_id)?;
+        let configured = self.database.setting(PLAYER_SETTING)?;
+        ProcessPlayerBackend.play_remote(configured.as_deref(), &playback)
+    }
+}
+
+fn normalize_relative_path(value: &str) -> AppResult<String> {
+    let path = Path::new(value);
+    let mut normalized = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(value) => normalized.push(value.to_string_lossy().into_owned()),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(AppError::message("媒体库路径不能越过已添加的目录"));
+            }
+        }
+    }
+    Ok(normalized.join("/"))
+}
+
+fn media_relative_path(folder: &FolderSummary, item: &MediaItem) -> String {
+    if !item.relative_path.is_empty() {
+        return item.relative_path.replace('\\', "/");
+    }
+    Path::new(&item.path)
+        .strip_prefix(&folder.path)
+        .unwrap_or_else(|_| Path::new(&item.name))
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn strip_parent<'a>(relative_path: &'a str, parent: &str) -> Option<&'a str> {
+    if parent.is_empty() {
+        return Some(relative_path);
+    }
+    relative_path
+        .strip_prefix(parent)
+        .and_then(|value| value.strip_prefix('/'))
+}
+
+fn join_relative(parent: &str, child: &str) -> String {
+    if parent.is_empty() {
+        child.to_string()
+    } else {
+        format!("{parent}/{child}")
+    }
+}
+
+fn video_entry(item: MediaItem, relative_path: String) -> LibraryEntry {
+    LibraryEntry {
+        key: format!("media:{}", item.id),
+        name: item.name,
+        relative_path,
+        kind: "video".to_string(),
+        media_id: Some(item.id),
+        extension: Some(item.extension),
+        modified_at: item.modified_at,
+        media_count: 1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_paths_cannot_escape_the_library() {
+        assert_eq!(
+            normalize_relative_path("Series/Season 01").unwrap(),
+            "Series/Season 01"
+        );
+        assert!(normalize_relative_path("../private").is_err());
+        assert!(normalize_relative_path("/private").is_err());
+    }
+
+    #[test]
+    fn parent_matching_respects_path_boundaries() {
+        assert_eq!(
+            strip_parent("Show/Season/file.mkv", "Show"),
+            Some("Season/file.mkv")
+        );
+        assert_eq!(strip_parent("Showcase/file.mkv", "Show"), None);
     }
 }

@@ -9,6 +9,7 @@
     | 'play'
     | 'refresh'
     | 'search'
+    | 'server'
     | 'settings'
     | 'sparkles'
     | 'trash'
@@ -47,6 +48,10 @@
   {:else if name === 'video'}
     <rect x="3" y="5" width="14" height="14" rx="2" />
     <path d="m17 10 4-2v8l-4-2Z" />
+  {:else if name === 'server'}
+    <rect x="4" y="3" width="16" height="7" rx="2" />
+    <rect x="4" y="14" width="16" height="7" rx="2" />
+    <path d="M8 6.5h.01M8 17.5h.01M12 6.5h5M12 17.5h5" />
   {:else if name === 'play'}
     <path d="m8 5 11 7-11 7Z" fill="currentColor" stroke="none" />
   {:else if name === 'search'}

@@ -1,5 +1,15 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { FolderSummary, MediaItem, PlayerStatus } from './types';
+import type {
+  FolderSummary,
+  LibraryEntry,
+  MediaItem,
+  MediaServerInput,
+  MediaServerSummary,
+  PlayerStatus,
+  RecentCollection,
+  RemoteLibraryEntry,
+  RemoteMediaDetail,
+} from './types';
 
 export const api = {
   listFolders: () => invoke<FolderSummary[]>('list_library_folders'),
@@ -15,8 +25,42 @@ export const api = {
       query: query || null,
       limit,
     }),
+  listLibraryEntries: (folderId: number, parent?: string, query?: string) =>
+    invoke<LibraryEntry[]>('list_library_entries', {
+      folderId,
+      parent: parent || null,
+      query: query || null,
+    }),
+  listRecentCollections: (limit = 8) =>
+    invoke<RecentCollection[]>('list_recent_collections', { limit }),
+  listMediaServers: () => invoke<MediaServerSummary[]>('list_media_servers'),
+  addMediaServer: (input: MediaServerInput) =>
+    invoke<MediaServerSummary>('add_media_server', { input }),
+  removeMediaServer: (serverId: number) =>
+    invoke<void>('remove_media_server', { serverId }),
+  listRemoteEntries: (serverId: number, parentId?: string) =>
+    invoke<RemoteLibraryEntry[]>('list_remote_entries', {
+      serverId,
+      parentId: parentId || null,
+    }),
+  getRemoteImage: (
+    serverId: number,
+    itemId: string,
+    imageType: 'Primary' | 'Backdrop' = 'Primary',
+    maxWidth = 360,
+  ) =>
+    invoke<string | null>('get_remote_image', {
+      serverId,
+      itemId,
+      imageType,
+      maxWidth,
+    }),
+  getRemoteMediaDetail: (serverId: number, itemId: string) =>
+    invoke<RemoteMediaDetail>('get_remote_media_detail', { serverId, itemId }),
   getPlayerStatus: () => invoke<PlayerStatus>('get_player_status'),
   setPlayerExecutable: (path?: string) =>
     invoke<PlayerStatus>('set_player_executable', { path: path ?? null }),
   playMedia: (mediaId: number) => invoke<void>('play_media', { mediaId }),
+  playRemoteMedia: (serverId: number, itemId: string) =>
+    invoke<void>('play_remote_media', { serverId, itemId }),
 };
