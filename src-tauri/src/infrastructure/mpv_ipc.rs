@@ -1,4 +1,6 @@
-use crate::error::{AppError, AppResult};
+#[cfg(unix)]
+use crate::error::AppError;
+use crate::error::AppResult;
 use crate::infrastructure::remote::{PlaybackReportKind, PlaybackState, RemotePlayback};
 use serde_json::{Value, json};
 use std::collections::HashMap;
