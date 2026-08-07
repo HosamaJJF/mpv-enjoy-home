@@ -31,16 +31,22 @@ case "${TARGET}" in
     ;;
   aarch64-apple-darwin)
     create_release
-    gh release upload "${REF}" dmg/*.dmg#mpv-enjoy-home_${VERSION}_macos-aarch64.dmg \
-      --repo "${REPO}" --clobber
+    for f in dmg/*.dmg; do
+      [ -f "${f}" ] || continue
+      gh release upload "${REF}" "${f}#mpv-enjoy-home_${VERSION}_macos-aarch64.dmg" \
+        --repo "${REPO}" --clobber
+    done
     tar -czf "mpv-enjoy-home_${VERSION}_macos-aarch64.app.tar.gz" -C macos "${APP_NAME}.app"
     gh release upload "${REF}" "mpv-enjoy-home_${VERSION}_macos-aarch64.app.tar.gz" \
       --repo "${REPO}" --clobber
     ;;
   x86_64-apple-darwin)
     create_release
-    gh release upload "${REF}" dmg/*.dmg#mpv-enjoy-home_${VERSION}_macos-x86_64.dmg \
-      --repo "${REPO}" --clobber
+    for f in dmg/*.dmg; do
+      [ -f "${f}" ] || continue
+      gh release upload "${REF}" "${f}#mpv-enjoy-home_${VERSION}_macos-x86_64.dmg" \
+        --repo "${REPO}" --clobber
+    done
     tar -czf "mpv-enjoy-home_${VERSION}_macos-x86_64.app.tar.gz" -C macos "${APP_NAME}.app"
     gh release upload "${REF}" "mpv-enjoy-home_${VERSION}_macos-x86_64.app.tar.gz" \
       --repo "${REPO}" --clobber
