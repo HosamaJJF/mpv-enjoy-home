@@ -220,6 +220,33 @@ pub struct PlayerStatus {
     pub source: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeMode {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AccentColor {
+    #[default]
+    Blue,
+    Pink,
+    Green,
+    Yellow,
+    Purple,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AppearanceSettings {
+    pub theme_mode: ThemeMode,
+    pub accent_color: AccentColor,
+}
+
 pub fn is_media_extension(extension: &str) -> bool {
     MEDIA_EXTENSIONS.binary_search(&extension).is_ok()
 }

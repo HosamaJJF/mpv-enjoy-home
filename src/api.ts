@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
+  AppearanceSettings,
   FolderSummary,
   LibraryEntry,
   MediaItem,
@@ -58,6 +59,10 @@ export const api = {
   getRemoteMediaDetail: (serverId: number, itemId: string) =>
     invoke<RemoteMediaDetail>('get_remote_media_detail', { serverId, itemId }),
   getPlayerStatus: () => invoke<PlayerStatus>('get_player_status'),
+  getAppearanceSettings: () =>
+    invoke<AppearanceSettings>('get_appearance_settings'),
+  setAppearanceSettings: (settings: AppearanceSettings) =>
+    invoke<AppearanceSettings>('set_appearance_settings', { settings }),
   setPlayerExecutable: (path?: string) =>
     invoke<PlayerStatus>('set_player_executable', { path: path ?? null }),
   playMedia: (mediaId: number) => invoke<void>('play_media', { mediaId }),

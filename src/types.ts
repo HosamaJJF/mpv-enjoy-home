@@ -135,3 +135,11 @@ export interface PlayerStatus {
   executable: string | null;
   source: 'configured' | 'environment' | 'bundled' | 'path' | 'unavailable';
 }
+
+export type ThemeMode = 'system' | 'light' | 'dark';
+export type AccentColor = 'blue' | 'pink' | 'green' | 'yellow' | 'purple';
+
+export interface AppearanceSettings {
+  themeMode: ThemeMode;
+  accentColor: AccentColor;
+}

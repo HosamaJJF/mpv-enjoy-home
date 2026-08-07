@@ -1,6 +1,7 @@
 use crate::domain::{
-    FolderSummary, LibraryEntry, MediaItem, MediaServerInput, MediaServerSummary, PlayerStatus,
-    RecentMediaItem, RemoteLibraryEntry, RemoteMediaDetail, natural_cmp,
+    AppearanceSettings, FolderSummary, LibraryEntry, MediaItem, MediaServerInput,
+    MediaServerSummary, PlayerStatus, RecentMediaItem, RemoteLibraryEntry, RemoteMediaDetail,
+    natural_cmp,
 };
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::database::Database;
@@ -11,6 +12,8 @@ use crate::infrastructure::remote::RemoteClient;
 use crate::infrastructure::scanner::scan_media;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
+
+const APPEARANCE_SETTING: &str = "appearance";
 
 #[derive(Debug, Clone)]
 pub struct AppService {
@@ -264,6 +267,25 @@ impl AppService {
         Ok(ProcessPlayerBackend.status(configured.as_deref()))
     }
 
+    pub fn appearance_settings(&self) -> AppResult<AppearanceSettings> {
+        Ok(self
+            .database
+            .setting(APPEARANCE_SETTING)?
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default())
+    }
+
+    pub fn set_appearance_settings(
+        &self,
+        settings: &AppearanceSettings,
+    ) -> AppResult<AppearanceSettings> {
+        let value = serde_json::to_string(settings)
+            .map_err(|error| AppError::message(format!("外观设置无法保存：{error}")))?;
+        self.database
+            .set_setting(APPEARANCE_SETTING, Some(&value))?;
+        Ok(*settings)
+    }
+
     pub fn set_player(&self, path: Option<&Path>) -> AppResult<PlayerStatus> {
         let normalized = path.map(normalize_selected_player).transpose()?;
         self.database.set_setting(
@@ -367,6 +389,7 @@ fn video_entry(item: MediaItem, relative_path: String) -> LibraryEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{AccentColor, ThemeMode};
 
     #[test]
     fn relative_paths_cannot_escape_the_library() {
@@ -376,6 +399,43 @@ mod tests {
         );
         assert!(normalize_relative_path("../private").is_err());
         assert!(normalize_relative_path("/private").is_err());
+    }
+
+    #[test]
+    fn appearance_settings_default_to_system_blue_and_persist() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mpv-enjoy-home-appearance-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let service = AppService::new(path.clone());
+        service.initialize().unwrap();
+        assert_eq!(
+            service.appearance_settings().unwrap(),
+            AppearanceSettings::default()
+        );
+
+        let selected = AppearanceSettings {
+            theme_mode: ThemeMode::Dark,
+            accent_color: AccentColor::Pink,
+        };
+        assert_eq!(
+            service.set_appearance_settings(&selected).unwrap(),
+            selected
+        );
+        assert_eq!(service.appearance_settings().unwrap(), selected);
+        drop(service);
+
+        for candidate in [
+            path.clone(),
+            PathBuf::from(format!("{}-wal", path.display())),
+            PathBuf::from(format!("{}-shm", path.display())),
+        ] {
+            let _ = std::fs::remove_file(candidate);
+        }
     }
 
     #[test]

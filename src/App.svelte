@@ -4,6 +4,8 @@
   import { api } from './api';
   import Icon from './components/Icon.svelte';
   import type {
+    AccentColor,
+    AppearanceSettings,
     FolderSummary,
     LibraryEntry,
     MediaServerInput,
@@ -14,6 +16,7 @@
     RemoteLibraryEntry,
     RemoteMediaDetail,
     RemoteSeasonDetail,
+    ThemeMode,
   } from './types';
 
   type View = 'home' | 'library' | 'settings';
@@ -26,6 +29,19 @@
     name: string;
     mode: 'list' | 'detail';
   };
+
+  const themeOptions: { value: ThemeMode; label: string }[] = [
+    { value: 'system', label: '跟随系统' },
+    { value: 'light', label: '明亮' },
+    { value: 'dark', label: '黑暗' },
+  ];
+  const accentOptions: { value: AccentColor; label: string }[] = [
+    { value: 'blue', label: '蓝色' },
+    { value: 'pink', label: '粉色' },
+    { value: 'green', label: '绿色' },
+    { value: 'yellow', label: '黄色' },
+    { value: 'purple', label: '紫色' },
+  ];
 
   let view = $state<View>('home');
   let folders = $state<FolderSummary[]>([]);
@@ -47,6 +63,13 @@
   let busyMessage = $state('正在整理媒体库…');
   let toast = $state<Toast | null>(null);
   let showServerForm = $state(false);
+  let sidebarCollapsed = $state(false);
+  let appearance = $state<AppearanceSettings>({
+    themeMode: 'system',
+    accentColor: 'blue',
+  });
+  let systemPrefersDark = $state(false);
+  let appearanceSaving = $state(false);
   let serverDraft = $state<MediaServerInput>(emptyServerDraft());
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let remoteLoadGeneration = 0;
@@ -86,10 +109,52 @@
           episode.parentIndexNumber === selectedSeason.indexNumber),
     );
   });
+  const effectiveTheme = $derived(
+    appearance.themeMode === 'system'
+      ? systemPrefersDark
+        ? 'dark'
+        : 'light'
+      : appearance.themeMode,
+  );
 
-  onMount(async () => {
-    await refreshOverview();
+  $effect(() => {
+    document.documentElement.dataset.theme = effectiveTheme;
+    document.documentElement.dataset.accent = appearance.accentColor;
+    document.documentElement.style.colorScheme = effectiveTheme;
   });
+
+  onMount(() => {
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+    const syncSystemTheme = () => (systemPrefersDark = systemTheme.matches);
+    syncSystemTheme();
+    systemTheme.addEventListener('change', syncSystemTheme);
+    void initializeApp();
+    return () => systemTheme.removeEventListener('change', syncSystemTheme);
+  });
+
+  async function initializeApp() {
+    try {
+      appearance = await api.getAppearanceSettings();
+    } catch (error) {
+      notify('error', normalizeError(error));
+    }
+    await refreshOverview();
+  }
+
+  async function updateAppearance(next: AppearanceSettings) {
+    if (appearanceSaving) return;
+    const previous = appearance;
+    appearance = next;
+    appearanceSaving = true;
+    try {
+      appearance = await api.setAppearanceSettings(next);
+    } catch (error) {
+      appearance = previous;
+      notify('error', normalizeError(error));
+    } finally {
+      appearanceSaving = false;
+    }
+  }
 
   async function refreshOverview() {
     try {
@@ -774,24 +839,48 @@
   <title>mpv-enjoy Home</title>
 </svelte:head>
 
-<div class="app-shell">
-  <aside class="sidebar">
+<div class="app-shell" class:sidebar-collapsed={sidebarCollapsed}>
+  <aside class="sidebar" id="primary-sidebar">
     <nav aria-label="主导航">
-      <button class:active={view === 'home'} onclick={() => (view = 'home')}>
+      <button
+        class:active={view === 'home'}
+        aria-label="首页"
+        title="首页"
+        onclick={() => (view = 'home')}
+      >
         <Icon name="home" /><span>首页</span>
       </button>
-      <button class:active={view === 'library'} onclick={openLibrarySources}>
+      <button
+        class:active={view === 'library'}
+        aria-label={`媒体库，${sourceCount} 个媒体源`}
+        title="媒体库"
+        onclick={openLibrarySources}
+      >
         <Icon name="library" /><span>媒体库</span>
         {#if sourceCount > 0}<em>{sourceCount}</em>{/if}
       </button>
       <button
         class:active={view === 'settings'}
+        aria-label="设置"
+        title="设置"
         onclick={() => (view = 'settings')}
       >
         <Icon name="settings" /><span>设置</span>
       </button>
     </nav>
 
+    <button
+      class="sidebar-toggle"
+      type="button"
+      aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+      aria-controls="primary-sidebar"
+      aria-expanded={!sidebarCollapsed}
+      title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+      onclick={() => (sidebarCollapsed = !sidebarCollapsed)}
+    >
+      <Icon name="back" size={18} />
+      <span>{sidebarCollapsed ? '展开侧栏' : '收起侧栏'}</span>
+    </button>
     <span class="version">Technical preview · 0.1.0</span>
   </aside>
 
@@ -1437,6 +1526,62 @@
           <h1>设置</h1>
         </div>
       </header>
+
+      <section class="settings-card appearance-card">
+        <div class="settings-icon appearance-icon">
+          <Icon name="sparkles" size={22} />
+        </div>
+        <div class="settings-copy">
+          <div class="settings-title">
+            <h2>外观</h2>
+          </div>
+          <div class="appearance-settings">
+            <div class="appearance-row">
+              <span class="appearance-label">主题模式</span>
+              <div class="theme-options" aria-label="主题模式">
+                {#each themeOptions as option (option.value)}
+                  <button
+                    type="button"
+                    class:active={appearance.themeMode === option.value}
+                    aria-pressed={appearance.themeMode === option.value}
+                    disabled={appearanceSaving}
+                    onclick={() =>
+                      void updateAppearance({
+                        ...appearance,
+                        themeMode: option.value,
+                      })}
+                  >
+                    {option.label}
+                  </button>
+                {/each}
+              </div>
+            </div>
+            <div class="appearance-row">
+              <span class="appearance-label">主题色</span>
+              <div class="accent-options" aria-label="主题色">
+                {#each accentOptions as option (option.value)}
+                  <button
+                    type="button"
+                    class:active={appearance.accentColor === option.value}
+                    data-color={option.value}
+                    aria-label={`${option.label}主题色`}
+                    aria-pressed={appearance.accentColor === option.value}
+                    title={option.label}
+                    disabled={appearanceSaving}
+                    onclick={() =>
+                      void updateAppearance({
+                        ...appearance,
+                        accentColor: option.value,
+                      })}
+                  >
+                    <span></span><em>{option.label}</em>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section class="settings-card">
         <div class="settings-icon"><Icon name="play" size={22} /></div>

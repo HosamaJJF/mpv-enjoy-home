@@ -36,6 +36,8 @@ pub fn run() {
             commands::get_remote_image,
             commands::get_remote_media_detail,
             commands::get_player_status,
+            commands::get_appearance_settings,
+            commands::set_appearance_settings,
             commands::set_player_executable,
             commands::play_media,
             commands::play_remote_media,

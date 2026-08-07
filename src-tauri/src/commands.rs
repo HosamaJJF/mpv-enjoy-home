@@ -1,7 +1,7 @@
 use crate::application::AppService;
 use crate::domain::{
-    FolderSummary, LibraryEntry, MediaItem, MediaServerInput, MediaServerSummary, PlayerStatus,
-    RecentMediaItem, RemoteLibraryEntry, RemoteMediaDetail,
+    AppearanceSettings, FolderSummary, LibraryEntry, MediaItem, MediaServerInput,
+    MediaServerSummary, PlayerStatus, RecentMediaItem, RemoteLibraryEntry, RemoteMediaDetail,
 };
 use std::path::PathBuf;
 use tauri::State;
@@ -166,6 +166,22 @@ pub async fn get_remote_media_detail(
 #[tauri::command]
 pub fn get_player_status(state: State<'_, AppState>) -> Result<PlayerStatus, String> {
     state.service.player_status().map_err(|error| error.0)
+}
+
+#[tauri::command]
+pub fn get_appearance_settings(state: State<'_, AppState>) -> Result<AppearanceSettings, String> {
+    state.service.appearance_settings().map_err(|error| error.0)
+}
+
+#[tauri::command]
+pub fn set_appearance_settings(
+    state: State<'_, AppState>,
+    settings: AppearanceSettings,
+) -> Result<AppearanceSettings, String> {
+    state
+        .service
+        .set_appearance_settings(&settings)
+        .map_err(|error| error.0)
 }
 
 #[tauri::command]
