@@ -1,6 +1,6 @@
 {
   "name": "mpv-enjoy-home",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "HosamaJJF",
   "private": true,
   "type": "module",
@@ -10,6 +10,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "release:metadata": "node scripts/generate-release-metadata.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

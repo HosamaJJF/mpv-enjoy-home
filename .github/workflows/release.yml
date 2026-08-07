@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-2025
+            target: x86_64-pc-windows-msvc
+          - label: macOS Apple Silicon
+            os: macos-15
+            target: aarch64-apple-darwin
+          - label: macOS Intel
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          targets: ${{ matrix.target }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build bundles and upload draft assets
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: __VERSION__
+          releaseDraft: true
+          prerelease: false
+          retryAttempts: 2
+          args: --target ${{ matrix.target }}
+
+  compliance:
+    name: Generate release metadata
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Rust SBOM generator
+        run: cargo install cargo-cyclonedx --version 0.5.9 --locked
+
+      - name: Generate third-party license inventory
+        run: npm run release:metadata
+
+      - name: Generate npm CycloneDX SBOM
+        run: >-
+          npm exec --yes --package=@cyclonedx/cyclonedx-npm@6.0.0 --
+          cyclonedx-npm --output-reproducible --validate
+          --output-file build/release-metadata/npm.cdx.json package.json
+
+      - name: Generate Rust CycloneDX SBOM
+        run: >-
+          cargo cyclonedx --manifest-path src-tauri/Cargo.toml --format json
+          --spec-version 1.5 --target all --override-filename rust.cdx
+
+      - name: Collect Rust SBOM
+        shell: bash
+        run: mv src-tauri/rust.cdx.json build/release-metadata/rust.cdx.json
+
+      - name: Upload release metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" build/release-metadata/* --clobber
+
+  publish:
+    name: Publish release
+    needs: compliance
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish completed draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --latest

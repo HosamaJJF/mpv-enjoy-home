@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { getVersion } from '@tauri-apps/api/app';
   import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
   import { api } from './api';
@@ -70,6 +71,7 @@
   });
   let systemPrefersDark = $state(false);
   let appearanceSaving = $state(false);
+  let appVersion = $state<string | null>(null);
   let serverDraft = $state<MediaServerInput>(emptyServerDraft());
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let remoteLoadGeneration = 0;
@@ -129,8 +131,17 @@
     syncSystemTheme();
     systemTheme.addEventListener('change', syncSystemTheme);
     void initializeApp();
+    void loadAppVersion();
     return () => systemTheme.removeEventListener('change', syncSystemTheme);
   });
+
+  async function loadAppVersion() {
+    try {
+      appVersion = await getVersion();
+    } catch {
+      appVersion = null;
+    }
+  }
 
   async function initializeApp() {
     try {
@@ -881,7 +892,10 @@
       <Icon name="back" size={18} />
       <span>{sidebarCollapsed ? '展开侧栏' : '收起侧栏'}</span>
     </button>
-    <span class="version">Technical preview · 0.1.0</span>
+    <span class="version">
+      mpv-enjoy Home{#if appVersion}
+        · {appVersion}{/if}
+    </span>
   </aside>
 
   <main>

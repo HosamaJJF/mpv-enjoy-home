@@ -617,7 +617,7 @@ impl RemoteClient {
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(15))
             .redirect(reqwest::redirect::Policy::none())
-            .user_agent("mpv-enjoy Home/0.1.0")
+            .user_agent(concat!("mpv-enjoy Home/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|error| remote_error("无法创建媒体服务器客户端", error))?;
         let mut api_base =
