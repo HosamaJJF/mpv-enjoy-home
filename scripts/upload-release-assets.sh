@@ -12,9 +12,10 @@ PREFIX="mpv-enjoy-home_${VERSION}"
 
 cd "${BUNDLE_DIR}"
 
-create_release() {
-  gh release create "${REF}" --repo "${REPO}" --draft --title "${VERSION}" || true
-}
+if ! gh release view "${REF}" --repo "${REPO}" >/dev/null 2>&1; then
+  echo "release ${REF} not found: create the draft release before pushing the tag" >&2
+  exit 1
+fi
 
 upload() {
   gh release upload "${REF}" "$1" --repo "${REPO}" --clobber
@@ -22,7 +23,6 @@ upload() {
 
 case "${TARGET}" in
   x86_64-pc-windows-msvc)
-    create_release
     for f in nsis/*.exe; do
       [ -f "${f}" ] || continue
       mv "${f}" "${PREFIX}_windows-x64-setup.exe"
@@ -35,7 +35,6 @@ case "${TARGET}" in
     upload "${PREFIX}_windows-x64.msi"
     ;;
   aarch64-apple-darwin)
-    create_release
     for f in dmg/*.dmg; do
       [ -f "${f}" ] || continue
       mv "${f}" "${PREFIX}_macos-aarch64.dmg"
@@ -45,7 +44,6 @@ case "${TARGET}" in
     upload "${PREFIX}_macos-aarch64.app.tar.gz"
     ;;
   x86_64-apple-darwin)
-    create_release
     for f in dmg/*.dmg; do
       [ -f "${f}" ] || continue
       mv "${f}" "${PREFIX}_macos-x86_64.dmg"
