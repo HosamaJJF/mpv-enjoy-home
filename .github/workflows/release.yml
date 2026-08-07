@@ -44,17 +44,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build bundles and upload draft assets
-        uses: tauri-apps/tauri-action@v1
+      - name: Build bundles
+        run: npm run tauri build -- --target ${{ matrix.target }}
+
+      - name: Upload release assets
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: v__VERSION__
-          releaseName: __VERSION__
-          releaseDraft: true
-          prerelease: false
-          retryAttempts: 2
-          args: --target ${{ matrix.target }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/upload-release-assets.sh "${{ matrix.target }}" "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}"
 
   compliance:
     name: Generate release metadata
