@@ -1,6 +1,7 @@
 use crate::domain::{
-    MediaServerConfig, MediaServerInput, RemoteEpisodeDetail, RemoteLibraryEntry,
-    RemoteMediaDetail, RemotePersonDetail, RemoteRecentMedia, RemoteSeasonDetail, natural_cmp,
+    MediaServerConfig, MediaServerCredentials, MediaServerInput, RemoteEpisodeDetail,
+    RemoteLibraryEntry, RemoteMediaDetail, RemotePersonDetail, RemoteRecentMedia,
+    RemoteSeasonDetail, natural_cmp,
 };
 use crate::error::{AppError, AppResult};
 use base64::Engine;
@@ -18,8 +19,8 @@ const TOKEN_HEADER: &str = "X-Emby-Token";
 const EMBY_AUTHORIZATION_HEADER: &str = "X-Emby-Authorization";
 const CLIENT_NAME: &str = "mpv-enjoy Home";
 const DEVICE_NAME: &str = "Desktop";
-const DEVICE_ID: &str = "mpv-enjoy-home-desktop";
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+const AUTHENTICATION_REQUIRED_MARKER: &str = "REMOTE_AUTHENTICATION_REQUIRED:";
 
 #[derive(Debug, Clone)]
 pub struct VerifiedServer {
@@ -81,6 +82,7 @@ pub struct RemoteClient {
     kind: String,
     token: String,
     user_id: String,
+    device_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -234,10 +236,10 @@ struct MediaStream {
 }
 
 impl RemoteClient {
-    pub fn verify(input: &MediaServerInput) -> AppResult<VerifiedServer> {
+    pub fn verify(input: &MediaServerInput, device_id: &str) -> AppResult<VerifiedServer> {
         let kind = normalize_kind(&input.kind)?;
         let base_url = normalize_base_url(&input.base_url)?;
-        let mut remote = Self::build(&kind, &base_url, "", "")?;
+        let mut remote = Self::build(&kind, &base_url, "", "", device_id)?;
         let username = normalize_username(&input.username)?;
         let password = normalize_password(&input.password)?;
         let result = remote
@@ -275,12 +277,30 @@ impl RemoteClient {
         })
     }
 
-    pub fn from_config(server: &MediaServerConfig) -> AppResult<Self> {
+    pub fn from_config(server: &MediaServerConfig, device_id: &str) -> AppResult<Self> {
         Self::build(
             &server.kind,
             &server.base_url,
             &server.token,
             &server.user_id,
+            device_id,
+        )
+    }
+
+    pub fn reauthenticate(
+        server: &MediaServerConfig,
+        credentials: &MediaServerCredentials,
+        device_id: &str,
+    ) -> AppResult<VerifiedServer> {
+        Self::verify(
+            &MediaServerInput {
+                kind: server.kind.clone(),
+                name: server.name.clone(),
+                base_url: server.base_url.clone(),
+                username: credentials.username.clone(),
+                password: credentials.password.clone(),
+            },
+            device_id,
         )
     }
 
@@ -510,7 +530,7 @@ impl RemoteClient {
             .unwrap_or_else(|| "stream".to_string());
         let mut url = self.endpoint(&["Videos", &item.id, &stream_name])?;
         url.query_pairs_mut()
-            .append_pair("DeviceId", DEVICE_ID)
+            .append_pair("DeviceId", &self.device_id)
             .append_pair("PlaySessionId", play_session_id)
             .append_pair("api_key", &self.token)
             .append_pair("Static", "true");
@@ -612,7 +632,13 @@ impl RemoteClient {
         Some(url)
     }
 
-    fn build(kind: &str, base_url: &str, token: &str, user_id: &str) -> AppResult<Self> {
+    fn build(
+        kind: &str,
+        base_url: &str,
+        token: &str,
+        user_id: &str,
+        device_id: &str,
+    ) -> AppResult<Self> {
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(15))
@@ -640,6 +666,7 @@ impl RemoteClient {
             kind: kind.to_string(),
             token: token.to_string(),
             user_id: user_id.to_string(),
+            device_id: normalize_device_id(device_id)?,
         })
     }
 
@@ -709,7 +736,7 @@ impl RemoteClient {
         let mut fields = vec![
             format!("Client=\"{CLIENT_NAME}\""),
             format!("Device=\"{DEVICE_NAME}\""),
-            format!("DeviceId=\"{DEVICE_ID}\""),
+            format!("DeviceId=\"{}\"", self.device_id),
             format!("Version=\"{}\"", env!("CARGO_PKG_VERSION")),
         ];
         if !self.user_id.is_empty() {
@@ -867,6 +894,18 @@ fn normalize_token(value: &str) -> AppResult<String> {
     Ok(token.to_string())
 }
 
+fn normalize_device_id(value: &str) -> AppResult<String> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err(AppError::message("媒体服务器设备标识无效"));
+    }
+    Ok(value.to_string())
+}
+
 fn safe_extension(value: &str) -> Option<&str> {
     let value = value.trim();
     if !value.is_empty()
@@ -1019,12 +1058,30 @@ fn ensure_success(response: Response) -> AppResult<Response> {
     if status.is_success() {
         return Ok(response);
     }
-    let message = match status.as_u16() {
-        401 | 403 => "媒体服务器拒绝了访问，请检查登录凭据或用户权限".to_string(),
+    Err(remote_status_error(status.as_u16()))
+}
+
+fn remote_status_error(status: u16) -> AppError {
+    let message = match status {
+        401 => {
+            return authentication_required("媒体服务器登录已失效，请重新登录");
+        }
+        403 => "当前用户没有访问此内容的权限；如果账号权限未改变，请尝试重新登录".to_string(),
         404 => "媒体服务器没有提供所需的兼容接口".to_string(),
         value => format!("媒体服务器请求失败（HTTP {value}）"),
     };
-    Err(AppError::message(message))
+    AppError::message(message)
+}
+
+pub(crate) fn requires_authentication(error: &AppError) -> bool {
+    error.0.starts_with(AUTHENTICATION_REQUIRED_MARKER)
+}
+
+pub(crate) fn authentication_required(message: impl AsRef<str>) -> AppError {
+    AppError::message(format!(
+        "{AUTHENTICATION_REQUIRED_MARKER}{}",
+        message.as_ref()
+    ))
 }
 
 fn ensure_login_success(response: Response) -> AppResult<Response> {
@@ -1281,8 +1338,14 @@ mod tests {
 
     #[test]
     fn preserves_base_urls_and_adds_only_the_emby_api_prefix() {
-        let emby =
-            RemoteClient::build("emby", "https://media.example/base", "token", "user").unwrap();
+        let emby = RemoteClient::build(
+            "emby",
+            "https://media.example/base",
+            "token",
+            "user",
+            "test-device",
+        )
+        .unwrap();
         assert_eq!(
             emby.endpoint(&["Users", "user", "Views"]).unwrap().as_str(),
             "https://media.example/base/emby/Users/user/Views"
@@ -1293,6 +1356,7 @@ mod tests {
             "https://media.example/jellyfin",
             "token",
             "user",
+            "test-device",
         )
         .unwrap();
         assert_eq!(
@@ -1306,8 +1370,14 @@ mod tests {
 
     #[test]
     fn builds_compatible_authorization_headers() {
-        let emby =
-            RemoteClient::build("emby", "https://media.example", "valid-token", "user-id").unwrap();
+        let emby = RemoteClient::build(
+            "emby",
+            "https://media.example",
+            "valid-token",
+            "user-id",
+            "test-device",
+        )
+        .unwrap();
         let headers = emby.request_headers().unwrap();
         assert_eq!(
             headers.get(TOKEN_HEADER).unwrap().to_str().unwrap(),
@@ -1318,6 +1388,7 @@ mod tests {
         assert!(authorization.contains("Client=\"mpv-enjoy Home\""));
         assert!(authorization.contains("UserId=\"user-id\""));
         assert!(authorization.contains("Token=\"valid-token\""));
+        assert!(authorization.contains("DeviceId=\"test-device\""));
         assert_eq!(
             headers
                 .get(EMBY_AUTHORIZATION_HEADER)
@@ -1327,7 +1398,9 @@ mod tests {
             authorization
         );
 
-        let jellyfin = RemoteClient::build("jellyfin", "https://media.example", "", "").unwrap();
+        let jellyfin =
+            RemoteClient::build("jellyfin", "https://media.example", "", "", "test-device")
+                .unwrap();
         let headers = jellyfin.request_headers().unwrap();
         assert!(
             headers
@@ -1344,8 +1417,21 @@ mod tests {
     fn validates_login_fields_without_requiring_a_password() {
         assert_eq!(normalize_username(" media-user ").unwrap(), "media-user");
         assert_eq!(normalize_password("").unwrap(), "");
+        assert_eq!(normalize_device_id("install-123").unwrap(), "install-123");
         assert!(normalize_username("\n").is_err());
+        assert!(normalize_device_id("bad\"device").is_err());
         assert!(validate_identifier("bad\"user", "用户 ID").is_err());
+    }
+
+    #[test]
+    fn distinguishes_revoked_tokens_from_permission_failures() {
+        let unauthorized = remote_status_error(401);
+        assert!(unauthorized.0.starts_with(AUTHENTICATION_REQUIRED_MARKER));
+        assert!(unauthorized.0.contains("重新登录"));
+
+        let forbidden = remote_status_error(403);
+        assert!(!forbidden.0.starts_with(AUTHENTICATION_REQUIRED_MARKER));
+        assert!(forbidden.0.contains("权限"));
     }
 
     #[test]
@@ -1372,8 +1458,14 @@ mod tests {
 
     #[test]
     fn builds_direct_play_and_external_track_urls() {
-        let remote =
-            RemoteClient::build("emby", "https://media.example", "valid-token", "user-id").unwrap();
+        let remote = RemoteClient::build(
+            "emby",
+            "https://media.example",
+            "valid-token",
+            "user-id",
+            "test-device",
+        )
+        .unwrap();
         let item = BaseItem {
             id: "episode-id".to_string(),
             name: "Episode".to_string(),
@@ -1424,7 +1516,7 @@ mod tests {
         let playback = remote.playback_item(&item, "session123").unwrap();
         assert_eq!(
             playback.url,
-            "https://media.example/emby/Videos/episode-id/stream.mkv?DeviceId=mpv-enjoy-home-desktop&PlaySessionId=session123&api_key=valid-token&Static=true&MediaSourceId=source-id"
+            "https://media.example/emby/Videos/episode-id/stream.mkv?DeviceId=test-device&PlaySessionId=session123&api_key=valid-token&Static=true&MediaSourceId=source-id"
         );
         assert_eq!(playback.title, "Series S01E02 - Episode");
         assert_eq!(playback.start_position_ticks, 123_450_000);

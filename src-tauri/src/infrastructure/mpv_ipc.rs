@@ -1,3 +1,4 @@
+use crate::domain::PlayerToggleMode;
 #[cfg(unix)]
 use crate::error::AppError;
 use crate::error::AppResult;
@@ -15,6 +16,9 @@ use uuid::Uuid;
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 const REPORT_INTERVAL: Duration = Duration::from_secs(10);
 const CONNECT_ATTEMPTS: usize = 100;
+const DANMAKU_SWITCH_PROPERTY: &str = "user-data/uosc_danmaku/danmaku-switch-on";
+const DANMAKU_SCRIPT_NAME: &str = "uosc_danmaku";
+const DANMAKU_TOGGLE_MESSAGE: &str = "show_danmaku_keyboard";
 
 #[cfg(unix)]
 type IpcStream = std::os::unix::net::UnixStream;
@@ -77,6 +81,7 @@ pub fn monitor_remote_playback(
     mut child: Child,
     endpoint: MpvIpcEndpoint,
     playback: RemotePlayback,
+    danmaku_mode: PlayerToggleMode,
 ) {
     thread::spawn(move || {
         let Some(mut ipc) = connect(&endpoint, &mut child) else {
@@ -85,6 +90,7 @@ pub fn monitor_remote_playback(
         };
         let mut active: Option<TrackedPlayback> = None;
         let mut child_exited = false;
+        let mut danmaku_sync_pending = danmaku_mode != PlayerToggleMode::Inherit;
 
         loop {
             match child.try_wait() {
@@ -96,10 +102,14 @@ pub fn monitor_remote_playback(
                 Err(_) => break,
             }
 
-            if let Ok(snapshot) = read_snapshot(&mut ipc)
-                && snapshot.playlist_index < playback.items.len()
-            {
-                update_tracking(&playback, &mut active, snapshot);
+            if let Ok(snapshot) = read_snapshot(&mut ipc) {
+                if danmaku_sync_pending {
+                    let _ = sync_danmaku_mode(&mut ipc, danmaku_mode);
+                    danmaku_sync_pending = false;
+                }
+                if snapshot.playlist_index < playback.items.len() {
+                    update_tracking(&playback, &mut active, snapshot);
+                }
             }
             thread::sleep(POLL_INTERVAL);
         }
@@ -115,6 +125,33 @@ pub fn monitor_remote_playback(
         if !child_exited {
             let _ = child.wait();
         }
+        drop(endpoint);
+    });
+}
+
+pub fn monitor_local_playback(
+    mut child: Child,
+    endpoint: MpvIpcEndpoint,
+    danmaku_mode: PlayerToggleMode,
+) {
+    thread::spawn(move || {
+        let Some(mut ipc) = connect(&endpoint, &mut child) else {
+            let _ = child.wait();
+            return;
+        };
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => {}
+                Err(_) => break,
+            }
+            if read_snapshot(&mut ipc).is_ok() {
+                let _ = sync_danmaku_mode(&mut ipc, danmaku_mode);
+                break;
+            }
+            thread::sleep(POLL_INTERVAL);
+        }
+        let _ = child.wait();
         drop(endpoint);
     });
 }
@@ -306,6 +343,64 @@ fn read_snapshot(ipc: &mut BufReader<IpcStream>) -> io::Result<PlaybackSnapshot>
     })
 }
 
+fn sync_danmaku_mode(ipc: &mut BufReader<IpcStream>, mode: PlayerToggleMode) -> io::Result<()> {
+    let expected = match mode {
+        PlayerToggleMode::Inherit => return Ok(()),
+        PlayerToggleMode::On => true,
+        PlayerToggleMode::Off => false,
+    };
+    let current = send_request(ipc, json!(["get_property", DANMAKU_SWITCH_PROPERTY]), 1_001)?
+        .as_bool()
+        .ok_or_else(|| io::Error::other("uosc_danmaku 未返回弹幕开关状态"))?;
+    if current != expected {
+        send_request(
+            ipc,
+            json!([
+                "script-message-to",
+                DANMAKU_SCRIPT_NAME,
+                DANMAKU_TOGGLE_MESSAGE
+            ]),
+            1_002,
+        )?;
+    }
+    Ok(())
+}
+
+fn send_request(
+    ipc: &mut BufReader<IpcStream>,
+    command: Value,
+    request_id: u64,
+) -> io::Result<Value> {
+    serde_json::to_writer(
+        &mut *ipc.get_mut(),
+        &json!({ "command": command, "request_id": request_id }),
+    )
+    .map_err(io::Error::other)?;
+    ipc.get_mut().write_all(b"\n")?;
+    ipc.get_mut().flush()?;
+
+    for _ in 0..64 {
+        let mut line = String::new();
+        if ipc.read_line(&mut line)? == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "mpv IPC 已关闭",
+            ));
+        }
+        let Ok(response) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if response.get("request_id").and_then(Value::as_u64) != Some(request_id) {
+            continue;
+        }
+        if response.get("error").and_then(Value::as_str) != Some("success") {
+            return Err(io::Error::other("mpv 无法应用弹幕启动状态"));
+        }
+        return Ok(response.get("data").cloned().unwrap_or(Value::Null));
+    }
+    Err(io::Error::other("mpv 未返回弹幕设置结果"))
+}
+
 fn finite_number(value: Option<&Value>) -> Option<f64> {
     value
         .and_then(Value::as_f64)
@@ -375,6 +470,64 @@ mod tests {
         assert!(!snapshot.state.muted);
         assert_eq!(snapshot.state.volume, Some(72.0));
         assert_eq!(snapshot.state.playback_rate, 1.25);
+        responder.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn toggles_uosc_danmaku_when_state_differs() {
+        use std::os::unix::net::UnixStream;
+
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let responder = thread::spawn(move || {
+            let mut reader = BufReader::new(server.try_clone().unwrap());
+            let mut request_line = String::new();
+            reader.read_line(&mut request_line).unwrap();
+            let request: Value = serde_json::from_str(&request_line).unwrap();
+            assert_eq!(
+                request["command"],
+                json!(["get_property", DANMAKU_SWITCH_PROPERTY])
+            );
+            server
+                .write_all(b"{\"data\":false,\"error\":\"success\",\"request_id\":1001}\n")
+                .unwrap();
+
+            request_line = String::new();
+            reader.read_line(&mut request_line).unwrap();
+            let request: Value = serde_json::from_str(&request_line).unwrap();
+            assert_eq!(
+                request["command"],
+                json!([
+                    "script-message-to",
+                    DANMAKU_SCRIPT_NAME,
+                    DANMAKU_TOGGLE_MESSAGE
+                ])
+            );
+            server
+                .write_all(b"{\"data\":null,\"error\":\"success\",\"request_id\":1002}\n")
+                .unwrap();
+        });
+
+        sync_danmaku_mode(&mut BufReader::new(client), PlayerToggleMode::On).unwrap();
+        responder.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keeps_uosc_danmaku_when_state_matches() {
+        use std::os::unix::net::UnixStream;
+
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let responder = thread::spawn(move || {
+            let mut reader = BufReader::new(server.try_clone().unwrap());
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            server
+                .write_all(b"{\"data\":true,\"error\":\"success\",\"request_id\":1001}\n")
+                .unwrap();
+        });
+
+        sync_danmaku_mode(&mut BufReader::new(client), PlayerToggleMode::On).unwrap();
         responder.join().unwrap();
     }
 }

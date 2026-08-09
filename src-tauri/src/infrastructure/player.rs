@@ -1,6 +1,8 @@
-use crate::domain::PlayerStatus;
+use crate::domain::{PlayerPreferences, PlayerStatus, PlayerToggleMode};
 use crate::error::{AppError, AppResult};
-use crate::infrastructure::mpv_ipc::{MpvIpcEndpoint, monitor_remote_playback};
+use crate::infrastructure::mpv_ipc::{
+    MpvIpcEndpoint, monitor_local_playback, monitor_remote_playback,
+};
 use crate::infrastructure::remote::RemotePlayback;
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -14,10 +16,16 @@ pub trait PlayerBackend {
     fn play_local(
         &self,
         configured: Option<&str>,
+        preferences: &PlayerPreferences,
         media: &[PathBuf],
         start_index: usize,
     ) -> AppResult<()>;
-    fn play_remote(&self, configured: Option<&str>, playback: &RemotePlayback) -> AppResult<()>;
+    fn play_remote(
+        &self,
+        configured: Option<&str>,
+        preferences: &PlayerPreferences,
+        playback: &RemotePlayback,
+    ) -> AppResult<()>;
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -31,27 +39,21 @@ impl PlayerBackend for ProcessPlayerBackend {
     fn play_local(
         &self,
         configured: Option<&str>,
+        preferences: &PlayerPreferences,
         media: &[PathBuf],
         start_index: usize,
     ) -> AppResult<()> {
-        let arguments = local_playback_arguments(media, start_index)?;
-        let status = discover_player(configured);
-        let executable = status
-            .executable
-            .ok_or_else(|| AppError::message("尚未找到 mpv，请先在设置中选择播放器"))?;
-        Command::new(executable)
-            .args(arguments)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| AppError::message(format!("无法启动播放器：{error}")))?;
-        Ok(())
-    }
-
-    fn play_remote(&self, configured: Option<&str>, playback: &RemotePlayback) -> AppResult<()> {
-        let endpoint = MpvIpcEndpoint::create()?;
-        let arguments = remote_playback_arguments(playback, Some(endpoint.address()))?;
+        let endpoint = (preferences.danmaku_mode != PlayerToggleMode::Inherit)
+            .then(MpvIpcEndpoint::create)
+            .transpose()
+            .ok()
+            .flatten();
+        let arguments = local_playback_arguments(
+            preferences,
+            endpoint.as_ref().map(MpvIpcEndpoint::address),
+            media,
+            start_index,
+        )?;
         let status = discover_player(configured);
         let executable = status
             .executable
@@ -63,30 +65,69 @@ impl PlayerBackend for ProcessPlayerBackend {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|error| AppError::message(format!("无法启动播放器：{error}")))?;
-        monitor_remote_playback(child, endpoint, playback.clone());
+        if let Some(endpoint) = endpoint {
+            monitor_local_playback(child, endpoint, preferences.danmaku_mode);
+        }
+        Ok(())
+    }
+
+    fn play_remote(
+        &self,
+        configured: Option<&str>,
+        preferences: &PlayerPreferences,
+        playback: &RemotePlayback,
+    ) -> AppResult<()> {
+        let endpoint = MpvIpcEndpoint::create().ok();
+        let arguments = remote_playback_arguments(
+            preferences,
+            playback,
+            endpoint.as_ref().map(MpvIpcEndpoint::address),
+        )?;
+        let status = discover_player(configured);
+        let executable = status
+            .executable
+            .ok_or_else(|| AppError::message("尚未找到 mpv，请先在设置中选择播放器"))?;
+        let child = Command::new(executable)
+            .args(arguments)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| AppError::message(format!("无法启动播放器：{error}")))?;
+        if let Some(endpoint) = endpoint {
+            monitor_remote_playback(child, endpoint, playback.clone(), preferences.danmaku_mode);
+        }
         Ok(())
     }
 }
 
-fn local_playback_arguments(media: &[PathBuf], start_index: usize) -> AppResult<Vec<OsString>> {
+fn local_playback_arguments(
+    preferences: &PlayerPreferences,
+    ipc_address: Option<&OsStr>,
+    media: &[PathBuf],
+    start_index: usize,
+) -> AppResult<Vec<OsString>> {
     validate_queue(media.len(), start_index)?;
     if media.iter().any(|path| !path.is_file()) {
         return Err(AppError::message(
             "播放列表中的媒体文件已被移动、删除或暂时不可用",
         ));
     }
-    let mut arguments = vec![
+    let mut arguments = preference_arguments(preferences);
+    arguments.extend([
         OsString::from("--autoload-files=yes"),
         OsString::from("--sub-auto=exact"),
         OsString::from("--audio-file-auto=exact"),
         OsString::from(format!("--playlist-start={start_index}")),
-        OsString::from("--"),
-    ];
+    ]);
+    push_ipc_argument(&mut arguments, ipc_address);
+    arguments.push(OsString::from("--"));
     arguments.extend(media.iter().map(|path| path.as_os_str().to_os_string()));
     Ok(arguments)
 }
 
 fn remote_playback_arguments(
+    preferences: &PlayerPreferences,
     playback: &RemotePlayback,
     ipc_address: Option<&OsStr>,
 ) -> AppResult<Vec<OsString>> {
@@ -99,7 +140,8 @@ fn remote_playback_arguments(
         }
     }
 
-    let mut arguments = vec![
+    let mut arguments = preference_arguments(preferences);
+    arguments.extend([
         OsString::from("--force-window=immediate"),
         // User mpv profiles may display `${filename}` or `${path}` when a
         // file starts. For remote playback that reveals the full URL,
@@ -107,12 +149,8 @@ fn remote_playback_arguments(
         OsString::from("--osd-playing-msg="),
         OsString::from("--script-opts-append=autoload-disabled=yes"),
         OsString::from(format!("--playlist-start={}", playback.start_index)),
-    ];
-    if let Some(address) = ipc_address {
-        let mut argument = OsString::from("--input-ipc-server=");
-        argument.push(address);
-        arguments.push(argument);
-    }
+    ]);
+    push_ipc_argument(&mut arguments, ipc_address);
     for item in &playback.items {
         // Remote URLs are constructed and validated by RemoteClient. mpv's
         // per-file markers keep each episode's sidecar tracks from leaking
@@ -142,6 +180,27 @@ fn remote_playback_arguments(
         arguments.push(OsString::from("--}"));
     }
     Ok(arguments)
+}
+
+fn preference_arguments(preferences: &PlayerPreferences) -> Vec<OsString> {
+    let mut arguments = Vec::new();
+    if let Some(volume) = preferences.startup_volume {
+        arguments.push(OsString::from(format!("--volume={volume}")));
+    }
+    match preferences.fullscreen_mode {
+        PlayerToggleMode::Inherit => {}
+        PlayerToggleMode::On => arguments.push(OsString::from("--fullscreen=yes")),
+        PlayerToggleMode::Off => arguments.push(OsString::from("--fullscreen=no")),
+    }
+    arguments
+}
+
+fn push_ipc_argument(arguments: &mut Vec<OsString>, ipc_address: Option<&OsStr>) {
+    if let Some(address) = ipc_address {
+        let mut argument = OsString::from("--input-ipc-server=");
+        argument.push(address);
+        arguments.push(argument);
+    }
 }
 
 fn validate_queue(length: usize, start_index: usize) -> AppResult<()> {
@@ -256,13 +315,22 @@ mod tests {
         fs::write(&first, []).unwrap();
         fs::write(&second, []).unwrap();
 
-        let arguments = local_playback_arguments(&[first.clone(), second.clone()], 1).unwrap();
+        let arguments = local_playback_arguments(
+            &PlayerPreferences::default(),
+            None,
+            &[first.clone(), second.clone()],
+            1,
+        )
+        .unwrap();
         assert!(arguments.contains(&OsString::from("--sub-auto=exact")));
         assert!(arguments.contains(&OsString::from("--audio-file-auto=exact")));
         assert!(arguments.contains(&OsString::from("--playlist-start=1")));
-        assert_eq!(arguments[4], OsString::from("--"));
-        assert_eq!(arguments[5], first.as_os_str());
-        assert_eq!(arguments[6], second.as_os_str());
+        let separator = arguments
+            .iter()
+            .position(|argument| argument == "--")
+            .unwrap();
+        assert_eq!(arguments[separator + 1], first.as_os_str());
+        assert_eq!(arguments[separator + 2], second.as_os_str());
 
         fs::remove_dir_all(directory).unwrap();
     }
@@ -302,8 +370,12 @@ mod tests {
             reporter: None,
         };
 
-        let arguments =
-            remote_playback_arguments(&playback, Some(OsStr::new("/tmp/mpv.sock"))).unwrap();
+        let arguments = remote_playback_arguments(
+            &PlayerPreferences::default(),
+            &playback,
+            Some(OsStr::new("/tmp/mpv.sock")),
+        )
+        .unwrap();
         assert!(arguments.contains(&OsString::from("--playlist-start=1")));
         assert!(arguments.contains(&OsString::from(
             "--script-opts-append=autoload-disabled=yes"
@@ -359,6 +431,32 @@ mod tests {
                 OsString::from("https://media.example/Videos/2/stream.mkv?api_key=token"),
                 OsString::from("--}"),
             ]
+        );
+    }
+
+    #[test]
+    fn typed_preferences_become_global_player_arguments() {
+        let preferences = PlayerPreferences {
+            startup_volume: Some(72),
+            fullscreen_mode: PlayerToggleMode::On,
+            danmaku_mode: PlayerToggleMode::Off,
+        };
+        assert_eq!(
+            preference_arguments(&preferences),
+            [
+                OsString::from("--volume=72"),
+                OsString::from("--fullscreen=yes"),
+            ]
+        );
+        assert!(preference_arguments(&PlayerPreferences::default()).is_empty());
+
+        let windowed = PlayerPreferences {
+            fullscreen_mode: PlayerToggleMode::Off,
+            ..PlayerPreferences::default()
+        };
+        assert_eq!(
+            preference_arguments(&windowed),
+            [OsString::from("--fullscreen=no")]
         );
     }
 }

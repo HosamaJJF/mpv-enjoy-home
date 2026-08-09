@@ -1,7 +1,8 @@
 use crate::application::AppService;
 use crate::domain::{
-    AppearanceSettings, FolderSummary, LibraryEntry, MediaItem, MediaServerInput,
-    MediaServerSummary, PlayerStatus, RecentMediaItem, RemoteLibraryEntry, RemoteMediaDetail,
+    AppearanceSettings, FolderSummary, LibraryEntry, MediaItem, MediaServerCredentials,
+    MediaServerInput, MediaServerSummary, PlayerPreferences, PlayerStatus, RecentMediaItem,
+    RemoteLibraryEntry, RemoteMediaDetail,
 };
 use std::path::PathBuf;
 use tauri::State;
@@ -106,6 +107,21 @@ pub async fn add_media_server(
 }
 
 #[tauri::command]
+pub async fn reauthenticate_media_server(
+    state: State<'_, AppState>,
+    server_id: i64,
+    credentials: MediaServerCredentials,
+) -> Result<MediaServerSummary, String> {
+    let service = state.service.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.reauthenticate_media_server(server_id, &credentials)
+    })
+    .await
+    .map_err(|error| format!("媒体服务器重新登录任务失败：{error}"))?
+    .map_err(|error| error.0)
+}
+
+#[tauri::command]
 pub fn remove_media_server(state: State<'_, AppState>, server_id: i64) -> Result<(), String> {
     state
         .service
@@ -166,6 +182,22 @@ pub async fn get_remote_media_detail(
 #[tauri::command]
 pub fn get_player_status(state: State<'_, AppState>) -> Result<PlayerStatus, String> {
     state.service.player_status().map_err(|error| error.0)
+}
+
+#[tauri::command]
+pub fn get_player_preferences(state: State<'_, AppState>) -> Result<PlayerPreferences, String> {
+    state.service.player_preferences().map_err(|error| error.0)
+}
+
+#[tauri::command]
+pub fn set_player_preferences(
+    state: State<'_, AppState>,
+    preferences: PlayerPreferences,
+) -> Result<PlayerPreferences, String> {
+    state
+        .service
+        .set_player_preferences(&preferences)
+        .map_err(|error| error.0)
 }
 
 #[tauri::command]

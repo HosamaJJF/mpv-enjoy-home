@@ -2,7 +2,11 @@
   import { getVersion } from '@tauri-apps/api/app';
   import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
-  import { api } from './api';
+  import {
+    api,
+    invokeErrorMessage,
+    isRemoteAuthenticationRequired,
+  } from './api';
   import Icon from './components/Icon.svelte';
   import type {
     AccentColor,
@@ -11,7 +15,9 @@
     LibraryEntry,
     MediaServerInput,
     MediaServerSummary,
+    PlayerPreferences,
     PlayerStatus,
+    PlayerToggleMode,
     RecentMediaItem,
     RemoteEpisodeDetail,
     RemoteLibraryEntry,
@@ -43,6 +49,11 @@
     { value: 'yellow', label: '黄色' },
     { value: 'purple', label: '紫色' },
   ];
+  const playerToggleOptions: { value: PlayerToggleMode; label: string }[] = [
+    { value: 'inherit', label: '跟随 mpv' },
+    { value: 'on', label: '开启' },
+    { value: 'off', label: '关闭' },
+  ];
 
   let view = $state<View>('home');
   let folders = $state<FolderSummary[]>([]);
@@ -58,12 +69,20 @@
   let currentPath = $state('');
   let remoteCrumbs = $state<RemoteCrumb[]>([]);
   let player = $state<PlayerStatus | null>(null);
+  let playerPreferences = $state<PlayerPreferences>({
+    startupVolume: null,
+    fullscreenMode: 'inherit',
+    danmakuMode: 'inherit',
+  });
+  let volumeDraft = $state(70);
   let search = $state('');
   let busy = $state(false);
   let libraryLoading = $state(false);
   let busyMessage = $state('正在整理媒体库…');
   let toast = $state<Toast | null>(null);
   let showServerForm = $state(false);
+  let reauthenticatingServer = $state<MediaServerSummary | null>(null);
+  let resumeServerAfterLogin = $state(false);
   let sidebarCollapsed = $state(false);
   let appearance = $state<AppearanceSettings>({
     themeMode: 'system',
@@ -71,6 +90,7 @@
   });
   let systemPrefersDark = $state(false);
   let appearanceSaving = $state(false);
+  let playerPreferencesSaving = $state(false);
   let appVersion = $state<string | null>(null);
   let serverDraft = $state<MediaServerInput>(emptyServerDraft());
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -149,6 +169,12 @@
     } catch (error) {
       notify('error', normalizeError(error));
     }
+    try {
+      playerPreferences = await api.getPlayerPreferences();
+      volumeDraft = playerPreferences.startupVolume ?? 70;
+    } catch (error) {
+      notify('error', normalizeError(error));
+    }
     await refreshOverview();
   }
 
@@ -164,6 +190,23 @@
       notify('error', normalizeError(error));
     } finally {
       appearanceSaving = false;
+    }
+  }
+
+  async function updatePlayerPreferences(next: PlayerPreferences) {
+    if (playerPreferencesSaving) return;
+    const previous = playerPreferences;
+    playerPreferences = next;
+    playerPreferencesSaving = true;
+    try {
+      playerPreferences = await api.setPlayerPreferences(next);
+      volumeDraft = playerPreferences.startupVolume ?? volumeDraft;
+    } catch (error) {
+      playerPreferences = previous;
+      volumeDraft = previous.startupVolume ?? volumeDraft;
+      notify('error', normalizeError(error));
+    } finally {
+      playerPreferencesSaving = false;
     }
   }
 
@@ -209,24 +252,70 @@
 
   function showConnectServer() {
     view = 'settings';
+    serverDraft = emptyServerDraft();
+    reauthenticatingServer = null;
+    resumeServerAfterLogin = false;
     showServerForm = true;
   }
 
+  function showServerReauthentication(
+    server: MediaServerSummary,
+    resumeLibrary = false,
+  ) {
+    if (reauthenticatingServer?.id === server.id && showServerForm) {
+      resumeServerAfterLogin ||= resumeLibrary;
+      view = 'settings';
+      return;
+    }
+    view = 'settings';
+    reauthenticatingServer = server;
+    resumeServerAfterLogin = resumeLibrary;
+    serverDraft = {
+      kind: server.kind,
+      name: server.name,
+      baseUrl: server.baseUrl,
+      username: server.userName,
+      password: '',
+    };
+    showServerForm = true;
+  }
+
+  function closeServerForm() {
+    serverDraft = emptyServerDraft();
+    reauthenticatingServer = null;
+    resumeServerAfterLogin = false;
+    showServerForm = false;
+  }
+
   async function connectServer() {
+    const reconnecting = reauthenticatingServer;
+    const resumeLibrary = resumeServerAfterLogin;
     await withBusy(
-      `正在连接 ${serverKindLabel(serverDraft.kind)}…`,
+      reconnecting
+        ? `正在重新登录“${reconnecting.name}”…`
+        : `正在连接 ${serverKindLabel(serverDraft.kind)}…`,
       async () => {
-        const server = await api.addMediaServer({
-          kind: serverDraft.kind,
-          name: serverDraft.name.trim(),
-          baseUrl: serverDraft.baseUrl.trim(),
-          username: serverDraft.username.trim(),
-          password: serverDraft.password,
-        });
-        serverDraft = emptyServerDraft();
-        showServerForm = false;
+        const server = reconnecting
+          ? await api.reauthenticateMediaServer(reconnecting.id, {
+              username: serverDraft.username.trim(),
+              password: serverDraft.password,
+            })
+          : await api.addMediaServer({
+              kind: serverDraft.kind,
+              name: serverDraft.name.trim(),
+              baseUrl: serverDraft.baseUrl.trim(),
+              username: serverDraft.username.trim(),
+              password: serverDraft.password,
+            });
+        closeServerForm();
         await refreshOverview();
-        notify('success', `已连接“${server.name}”`);
+        notify(
+          'success',
+          reconnecting
+            ? `“${server.name}”已重新登录`
+            : `已连接“${server.name}”`,
+        );
+        if (reconnecting && resumeLibrary) await openRemoteServer(server);
       },
     );
   }
@@ -312,7 +401,7 @@
       remoteEntries = entries;
       void loadRemoteImages(server.id, entries, generation);
     } catch (error) {
-      notify('error', normalizeError(error));
+      handleRemoteError(error, server);
     } finally {
       if (generation === remoteLoadGeneration) libraryLoading = false;
     }
@@ -331,7 +420,7 @@
       selectedSeasonId = preferredSeason(detail)?.id ?? null;
       void loadRemoteDetailImages(server.id, detail, generation);
     } catch (error) {
-      notify('error', normalizeError(error));
+      handleRemoteError(error, server);
     } finally {
       if (generation === remoteLoadGeneration) libraryLoading = false;
     }
@@ -411,7 +500,9 @@
         1600,
       );
       if (generation === remoteLoadGeneration) remoteBackdrop = backdrop;
-    } catch {
+    } catch (error) {
+      const server = servers.find((entry) => entry.id === serverId);
+      if (server && handleRemoteAuthenticationError(error, server)) return;
       // The detail remains useful when a server image has disappeared.
     }
   }
@@ -433,7 +524,9 @@
           if (image && generation === remoteLoadGeneration) {
             remoteImages = { ...remoteImages, [imageId]: image };
           }
-        } catch {
+        } catch (error) {
+          const server = servers.find((entry) => entry.id === serverId);
+          if (server && handleRemoteAuthenticationError(error, server)) return;
           // Missing remote artwork uses the CSS fallback.
         }
       }
@@ -486,6 +579,7 @@
     }
     try {
       await api.removeMediaServer(server.id);
+      if (reauthenticatingServer?.id === server.id) closeServerForm();
       if (
         selectedSource?.kind === 'remote' &&
         selectedSource.server.id === server.id
@@ -515,10 +609,12 @@
 
   async function playRemoteItem(itemId: string, name: string) {
     if (selectedSource?.kind !== 'remote') return;
+    const server = selectedSource.server;
     try {
-      await api.playRemoteMedia(selectedSource.server.id, itemId);
+      await api.playRemoteMedia(server.id, itemId);
       notify('success', `已交给 mpv 播放：${name}`);
     } catch (error) {
+      if (handleRemoteAuthenticationError(error, server)) return;
       handlePlaybackError(error);
     }
   }
@@ -627,12 +723,32 @@
     toastTimer = setTimeout(() => (toast = null), 3600);
   }
 
+  function handleRemoteAuthenticationError(
+    error: unknown,
+    server: MediaServerSummary,
+  ) {
+    if (!isRemoteAuthenticationRequired(error)) return false;
+    const alreadyPrompting =
+      reauthenticatingServer?.id === server.id && showServerForm;
+    const resumeLibrary =
+      view === 'library' &&
+      selectedSource?.kind === 'remote' &&
+      selectedSource.server.id === server.id;
+    showServerReauthentication(server, resumeLibrary);
+    if (!alreadyPrompting) {
+      notify('error', `“${server.name}”登录已失效，请重新登录`);
+    }
+    return true;
+  }
+
+  function handleRemoteError(error: unknown, server: MediaServerSummary) {
+    if (!handleRemoteAuthenticationError(error, server)) {
+      notify('error', normalizeError(error));
+    }
+  }
+
   function normalizeError(error: unknown) {
-    return typeof error === 'string'
-      ? error
-      : error instanceof Error
-        ? error.message
-        : '发生未知错误';
+    return invokeErrorMessage(error);
   }
 
   function formatScanTime(timestamp: number | null) {
@@ -1354,21 +1470,22 @@
                   <div class="detail-section-heading">
                     <div>
                       <span class="eyebrow">季度与单集</span>
-                      <h3>{selectedSeason?.name ?? '剧集'}</h3>
+                      <h3>单集</h3>
                     </div>
                     {#if remoteDetail.seasons.length > 1}
-                      <div class="season-selector" aria-label="选择季度">
-                        {#each remoteDetail.seasons as season (season.id)}
-                          <button
-                            class:active={season.id === selectedSeason?.id}
-                            onclick={() => selectRemoteSeason(season.id)}
-                          >
-                            <span>{season.name}</span><small
-                              >{seasonProgress(season)}</small
-                            >
-                          </button>
-                        {/each}
-                      </div>
+                      <label class="season-selector">
+                        <span>季度</span>
+                        <select
+                          aria-label="选择季度"
+                          value={selectedSeason?.id ?? ''}
+                          onchange={(event) =>
+                            void selectRemoteSeason(event.currentTarget.value)}
+                        >
+                          {#each remoteDetail.seasons as season (season.id)}
+                            <option value={season.id}>{season.name}</option>
+                          {/each}
+                        </select>
+                      </label>
                     {/if}
                   </div>
 
@@ -1618,6 +1735,94 @@
               </dd>
             </div>
           </dl>
+          <div class="player-preferences">
+            <div class="preference-row">
+              <span class="preference-copy">
+                <strong>启动音量</strong>
+                <small>仅覆盖从 Home 启动的播放器</small>
+              </span>
+              <div class="volume-preference">
+                <label class="override-toggle">
+                  <input
+                    type="checkbox"
+                    checked={playerPreferences.startupVolume !== null}
+                    disabled={playerPreferencesSaving}
+                    onchange={(event) =>
+                      void updatePlayerPreferences({
+                        ...playerPreferences,
+                        startupVolume: event.currentTarget.checked
+                          ? volumeDraft
+                          : null,
+                      })}
+                  />
+                  <span>自定义</span>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={volumeDraft}
+                  aria-label="播放器启动音量"
+                  disabled={playerPreferences.startupVolume === null ||
+                    playerPreferencesSaving}
+                  oninput={(event) =>
+                    (volumeDraft = Number(event.currentTarget.value))}
+                  onchange={() =>
+                    void updatePlayerPreferences({
+                      ...playerPreferences,
+                      startupVolume: volumeDraft,
+                    })}
+                />
+                <output
+                  >{playerPreferences.startupVolume === null
+                    ? '跟随 mpv'
+                    : `${volumeDraft}%`}</output
+                >
+              </div>
+            </div>
+            <label class="preference-row">
+              <span class="preference-copy">
+                <strong>全屏启动</strong>
+                <small>可明确开启、关闭或保留 mpv 配置</small>
+              </span>
+              <select
+                class="preference-select"
+                value={playerPreferences.fullscreenMode}
+                disabled={playerPreferencesSaving}
+                onchange={(event) =>
+                  void updatePlayerPreferences({
+                    ...playerPreferences,
+                    fullscreenMode: event.currentTarget
+                      .value as PlayerToggleMode,
+                  })}
+              >
+                {#each playerToggleOptions as option (option.value)}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </select>
+            </label>
+            <label class="preference-row">
+              <span class="preference-copy">
+                <strong>uosc_danmaku 弹幕</strong>
+                <small>插件不可用时会忽略此项，不影响播放</small>
+              </span>
+              <select
+                class="preference-select"
+                value={playerPreferences.danmakuMode}
+                disabled={playerPreferencesSaving}
+                onchange={(event) =>
+                  void updatePlayerPreferences({
+                    ...playerPreferences,
+                    danmakuMode: event.currentTarget.value as PlayerToggleMode,
+                  })}
+              >
+                {#each playerToggleOptions as option (option.value)}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </select>
+            </label>
+          </div>
           <div class="settings-actions">
             <button class="primary" onclick={choosePlayer}>选择播放器</button
             ><button class="secondary" onclick={resetPlayer}
@@ -1660,6 +1865,12 @@
                     ><Icon name="library" size={17} /></button
                   >
                   <button
+                    aria-label={`重新登录 ${server.name}`}
+                    title="重新登录"
+                    onclick={() => showServerReauthentication(server)}
+                    ><Icon name="refresh" size={17} /></button
+                  >
+                  <button
                     aria-label={`移除 ${server.name}`}
                     title="移除连接"
                     onclick={() => removeServer(server)}
@@ -1678,8 +1889,16 @@
                 void connectServer();
               }}
             >
+              <p class="form-note wide">
+                {#if reauthenticatingServer}
+                  正在更新“{reauthenticatingServer.name}”的登录凭据，连接记录和媒体库入口会保留。
+                {/if}
+                密码会保存在本机应用数据中，不使用系统钥匙串，仅供后端在令牌失效时自动重新登录。
+              </p>
               <label
-                ><span>服务类型</span><select bind:value={serverDraft.kind}
+                ><span>服务类型</span><select
+                  bind:value={serverDraft.kind}
+                  disabled={!!reauthenticatingServer}
                   ><option value="emby">Emby</option><option value="jellyfin"
                     >Jellyfin</option
                   ></select
@@ -1688,6 +1907,7 @@
               <label
                 ><span>显示名称（可选）</span><input
                   bind:value={serverDraft.name}
+                  readonly={!!reauthenticatingServer}
                   placeholder="例如：客厅媒体库"
                 /></label
               >
@@ -1696,6 +1916,7 @@
                   bind:value={serverDraft.baseUrl}
                   type="url"
                   required
+                  readonly={!!reauthenticatingServer}
                   placeholder="http://192.168.1.20:8096"
                 /></label
               >
@@ -1719,13 +1940,15 @@
                 <button
                   type="button"
                   class="secondary"
-                  onclick={() => (showServerForm = false)}>取消</button
-                ><button type="submit" class="primary">测试并保存</button>
+                  onclick={closeServerForm}>取消</button
+                ><button type="submit" class="primary"
+                  >{reauthenticatingServer ? '重新登录' : '测试并保存'}</button
+                >
               </div>
             </form>
           {:else}
             <div class="settings-actions">
-              <button class="primary" onclick={() => (showServerForm = true)}
+              <button class="primary" onclick={showConnectServer}
                 ><Icon name="add" />连接媒体服务器</button
               >
             </div>

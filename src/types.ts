@@ -49,6 +49,11 @@ export interface MediaServerInput {
   password: string;
 }
 
+export interface MediaServerCredentials {
+  username: string;
+  password: string;
+}
+
 export interface MediaServerSummary {
   id: number;
   kind: 'emby' | 'jellyfin';
@@ -134,6 +139,14 @@ export interface PlayerStatus {
   available: boolean;
   executable: string | null;
   source: 'configured' | 'environment' | 'bundled' | 'path' | 'unavailable';
+}
+
+export type PlayerToggleMode = 'inherit' | 'on' | 'off';
+
+export interface PlayerPreferences {
+  startupVolume: number | null;
+  fullscreenMode: PlayerToggleMode;
+  danmakuMode: PlayerToggleMode;
 }
 
 export type ThemeMode = 'system' | 'light' | 'dark';

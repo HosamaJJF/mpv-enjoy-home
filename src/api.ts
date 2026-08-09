@@ -4,13 +4,36 @@ import type {
   FolderSummary,
   LibraryEntry,
   MediaItem,
+  MediaServerCredentials,
   MediaServerInput,
   MediaServerSummary,
+  PlayerPreferences,
   PlayerStatus,
   RecentMediaItem,
   RemoteLibraryEntry,
   RemoteMediaDetail,
 } from './types';
+
+const REMOTE_AUTHENTICATION_REQUIRED_MARKER = 'REMOTE_AUTHENTICATION_REQUIRED:';
+
+function errorText(error: unknown) {
+  return typeof error === 'string'
+    ? error
+    : error instanceof Error
+      ? error.message
+      : null;
+}
+
+export function isRemoteAuthenticationRequired(error: unknown) {
+  return errorText(error)?.startsWith(REMOTE_AUTHENTICATION_REQUIRED_MARKER);
+}
+
+export function invokeErrorMessage(error: unknown) {
+  const message = errorText(error);
+  return message
+    ? message.replace(REMOTE_AUTHENTICATION_REQUIRED_MARKER, '')
+    : '发生未知错误';
+}
 
 export const api = {
   listFolders: () => invoke<FolderSummary[]>('list_library_folders'),
@@ -37,6 +60,14 @@ export const api = {
   listMediaServers: () => invoke<MediaServerSummary[]>('list_media_servers'),
   addMediaServer: (input: MediaServerInput) =>
     invoke<MediaServerSummary>('add_media_server', { input }),
+  reauthenticateMediaServer: (
+    serverId: number,
+    credentials: MediaServerCredentials,
+  ) =>
+    invoke<MediaServerSummary>('reauthenticate_media_server', {
+      serverId,
+      credentials,
+    }),
   removeMediaServer: (serverId: number) =>
     invoke<void>('remove_media_server', { serverId }),
   listRemoteEntries: (serverId: number, parentId?: string) =>
@@ -59,6 +90,10 @@ export const api = {
   getRemoteMediaDetail: (serverId: number, itemId: string) =>
     invoke<RemoteMediaDetail>('get_remote_media_detail', { serverId, itemId }),
   getPlayerStatus: () => invoke<PlayerStatus>('get_player_status'),
+  getPlayerPreferences: () =>
+    invoke<PlayerPreferences>('get_player_preferences'),
+  setPlayerPreferences: (preferences: PlayerPreferences) =>
+    invoke<PlayerPreferences>('set_player_preferences', { preferences }),
   getAppearanceSettings: () =>
     invoke<AppearanceSettings>('get_appearance_settings'),
   setAppearanceSettings: (settings: AppearanceSettings) =>

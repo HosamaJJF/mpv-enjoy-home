@@ -16,6 +16,13 @@ pub fn run() {
         .setup(|app| {
             let data_directory = app.path().app_data_dir()?;
             fs::create_dir_all(&data_directory)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut permissions = fs::metadata(&data_directory)?.permissions();
+                permissions.set_mode(0o700);
+                fs::set_permissions(&data_directory, permissions)?;
+            }
             let service = AppService::new(data_directory.join("mpv-enjoy-home.sqlite3"));
             service.initialize()?;
             app.manage(AppState { service });
@@ -31,11 +38,14 @@ pub fn run() {
             commands::list_recent_media,
             commands::list_media_servers,
             commands::add_media_server,
+            commands::reauthenticate_media_server,
             commands::remove_media_server,
             commands::list_remote_entries,
             commands::get_remote_image,
             commands::get_remote_media_detail,
             commands::get_player_status,
+            commands::get_player_preferences,
+            commands::set_player_preferences,
             commands::get_appearance_settings,
             commands::set_appearance_settings,
             commands::set_player_executable,

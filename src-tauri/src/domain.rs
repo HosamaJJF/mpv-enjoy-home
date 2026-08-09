@@ -89,6 +89,14 @@ pub struct MediaServerInput {
     pub password: String,
 }
 
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaServerCredentials {
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaServerSummary {
@@ -103,7 +111,7 @@ pub struct MediaServerSummary {
     pub last_connected_at: Option<i64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MediaServerConfig {
     pub id: i64,
     pub kind: String,
@@ -112,6 +120,7 @@ pub struct MediaServerConfig {
     pub token: String,
     pub user_id: String,
     pub user_name: String,
+    pub password: Option<String>,
     pub server_version: Option<String>,
     pub added_at: i64,
     pub last_connected_at: Option<i64>,
@@ -218,6 +227,23 @@ pub struct PlayerStatus {
     pub available: bool,
     pub executable: Option<String>,
     pub source: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlayerToggleMode {
+    #[default]
+    Inherit,
+    On,
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PlayerPreferences {
+    pub startup_volume: Option<u8>,
+    pub fullscreen_mode: PlayerToggleMode,
+    pub danmaku_mode: PlayerToggleMode,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]

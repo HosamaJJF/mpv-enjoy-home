@@ -1,34 +1,44 @@
 use crate::domain::{
-    AppearanceSettings, FolderSummary, LibraryEntry, MediaItem, MediaServerInput,
-    MediaServerSummary, PlayerStatus, RecentMediaItem, RemoteLibraryEntry, RemoteMediaDetail,
-    natural_cmp,
+    AppearanceSettings, FolderSummary, LibraryEntry, MediaItem, MediaServerCredentials,
+    MediaServerInput, MediaServerSummary, PlayerPreferences, PlayerStatus, RecentMediaItem,
+    RemoteLibraryEntry, RemoteMediaDetail, natural_cmp,
 };
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::database::Database;
 use crate::infrastructure::player::{
     PLAYER_SETTING, PlayerBackend, ProcessPlayerBackend, normalize_selected_player,
 };
-use crate::infrastructure::remote::RemoteClient;
+use crate::infrastructure::remote::{
+    RemoteClient, authentication_required, requires_authentication,
+};
 use crate::infrastructure::scanner::scan_media;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use uuid::Uuid;
 
 const APPEARANCE_SETTING: &str = "appearance";
+const PLAYER_PREFERENCES_SETTING: &str = "player.preferences";
+const REMOTE_DEVICE_ID_SETTING: &str = "remote.device-id";
 
 #[derive(Debug, Clone)]
 pub struct AppService {
     database: Database,
+    remote_auth_lock: Arc<Mutex<()>>,
 }
 
 impl AppService {
     pub fn new(database_path: PathBuf) -> Self {
         Self {
             database: Database::new(database_path),
+            remote_auth_lock: Arc::new(Mutex::new(())),
         }
     }
 
     pub fn initialize(&self) -> AppResult<()> {
-        self.database.initialize()
+        self.database.initialize()?;
+        self.remote_device_id()?;
+        Ok(())
     }
 
     pub fn list_folders(&self) -> AppResult<Vec<FolderSummary>> {
@@ -170,8 +180,9 @@ impl AppService {
                 .iter()
                 .map(|server| {
                     scope.spawn(move || {
-                        let result = RemoteClient::from_config(server)
-                            .and_then(|client| client.list_recent_media(limit));
+                        let result = self.with_remote_client(server.id, |client| {
+                            client.list_recent_media(limit)
+                        });
                         (server.id, server.name.clone(), result)
                     })
                 })
@@ -215,7 +226,8 @@ impl AppService {
     }
 
     pub fn add_media_server(&self, input: &MediaServerInput) -> AppResult<MediaServerSummary> {
-        let server = RemoteClient::verify(input)?;
+        let device_id = self.remote_device_id()?;
+        let server = RemoteClient::verify(input, &device_id)?;
         self.database.save_media_server(
             &server.kind,
             &server.name,
@@ -223,7 +235,36 @@ impl AppService {
             &server.token,
             &server.user_id,
             &server.user_name,
+            &input.password,
             server.server_version.as_deref(),
+        )
+    }
+
+    pub fn reauthenticate_media_server(
+        &self,
+        server_id: i64,
+        credentials: &MediaServerCredentials,
+    ) -> AppResult<MediaServerSummary> {
+        let _guard = self
+            .remote_auth_lock
+            .lock()
+            .map_err(|_| AppError::message("媒体服务器重新登录状态不可用"))?;
+        let current = self.database.media_server(server_id)?;
+        let device_id = self.remote_device_id()?;
+        let verified = match RemoteClient::reauthenticate(&current, credentials, &device_id) {
+            Ok(verified) => verified,
+            Err(error) => {
+                self.database.clear_media_server_password(server_id)?;
+                return Err(error);
+            }
+        };
+        self.database.update_media_server_session(
+            server_id,
+            &verified.token,
+            &verified.user_id,
+            &verified.user_name,
+            Some(&credentials.password),
+            verified.server_version.as_deref(),
         )
     }
 
@@ -236,8 +277,8 @@ impl AppService {
         server_id: i64,
         parent_id: Option<&str>,
     ) -> AppResult<Vec<RemoteLibraryEntry>> {
-        let server = self.database.media_server(server_id)?;
-        let entries = RemoteClient::from_config(&server)?.list_entries(parent_id)?;
+        let entries =
+            self.with_remote_client(server_id, |client| client.list_entries(parent_id))?;
         self.database.mark_media_server_connected(server_id)?;
         Ok(entries)
     }
@@ -247,8 +288,7 @@ impl AppService {
         server_id: i64,
         item_id: &str,
     ) -> AppResult<RemoteMediaDetail> {
-        let server = self.database.media_server(server_id)?;
-        RemoteClient::from_config(&server)?.media_detail(item_id)
+        self.with_remote_client(server_id, |client| client.media_detail(item_id))
     }
 
     pub fn remote_image(
@@ -258,13 +298,39 @@ impl AppService {
         image_type: &str,
         max_width: u32,
     ) -> AppResult<Option<String>> {
-        let server = self.database.media_server(server_id)?;
-        RemoteClient::from_config(&server)?.image_data_url(item_id, image_type, max_width)
+        self.with_remote_client(server_id, |client| {
+            client.image_data_url(item_id, image_type, max_width)
+        })
     }
 
     pub fn player_status(&self) -> AppResult<PlayerStatus> {
         let configured = self.database.setting(PLAYER_SETTING)?;
         Ok(ProcessPlayerBackend.status(configured.as_deref()))
+    }
+
+    pub fn player_preferences(&self) -> AppResult<PlayerPreferences> {
+        Ok(self
+            .database
+            .setting(PLAYER_PREFERENCES_SETTING)?
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default())
+    }
+
+    pub fn set_player_preferences(
+        &self,
+        preferences: &PlayerPreferences,
+    ) -> AppResult<PlayerPreferences> {
+        if preferences
+            .startup_volume
+            .is_some_and(|volume| volume > 100)
+        {
+            return Err(AppError::message("播放器启动音量必须在 0 到 100 之间"));
+        }
+        let value = serde_json::to_string(preferences)
+            .map_err(|error| AppError::message(format!("播放器偏好无法保存：{error}")))?;
+        self.database
+            .set_setting(PLAYER_PREFERENCES_SETTING, Some(&value))?;
+        Ok(*preferences)
     }
 
     pub fn appearance_settings(&self) -> AppResult<AppearanceSettings> {
@@ -317,15 +383,99 @@ impl AppService {
             .map(|item| PathBuf::from(item.path))
             .collect::<Vec<_>>();
         let configured = self.database.setting(PLAYER_SETTING)?;
-        ProcessPlayerBackend.play_local(configured.as_deref(), &media, start_index)
+        let preferences = self.player_preferences()?;
+        ProcessPlayerBackend.play_local(configured.as_deref(), &preferences, &media, start_index)
     }
 
     pub fn play_remote_media(&self, server_id: i64, item_id: &str) -> AppResult<()> {
-        let server = self.database.media_server(server_id)?;
-        let playback = RemoteClient::from_config(&server)?.playback(item_id)?;
+        let playback = self.with_remote_client(server_id, |client| client.playback(item_id))?;
         let configured = self.database.setting(PLAYER_SETTING)?;
-        ProcessPlayerBackend.play_remote(configured.as_deref(), &playback)
+        let preferences = self.player_preferences()?;
+        ProcessPlayerBackend.play_remote(configured.as_deref(), &preferences, &playback)
     }
+
+    fn with_remote_client<T>(
+        &self,
+        server_id: i64,
+        action: impl Fn(&RemoteClient) -> AppResult<T>,
+    ) -> AppResult<T> {
+        let device_id = self.remote_device_id()?;
+        let initial = self.database.media_server(server_id)?;
+        let client = RemoteClient::from_config(&initial, &device_id)?;
+        let first_error = match action(&client) {
+            Ok(result) => return Ok(result),
+            Err(error) if requires_authentication(&error) => error,
+            Err(error) => return Err(error),
+        };
+
+        let _guard = self
+            .remote_auth_lock
+            .lock()
+            .map_err(|_| AppError::message("媒体服务器重新登录状态不可用"))?;
+        let current = self.database.media_server(server_id)?;
+        if current.token != initial.token {
+            let refreshed = RemoteClient::from_config(&current, &device_id)?;
+            match action(&refreshed) {
+                Ok(result) => return Ok(result),
+                Err(error) if requires_authentication(&error) => {}
+                Err(error) => return Err(error),
+            }
+        }
+
+        let Some(password) = current.password.clone() else {
+            return Err(first_error);
+        };
+        let credentials = MediaServerCredentials {
+            username: current.user_name.clone(),
+            password,
+        };
+        let verified = match RemoteClient::reauthenticate(&current, &credentials, &device_id) {
+            Ok(verified) => verified,
+            Err(_) => {
+                self.database.clear_media_server_password(server_id)?;
+                return Err(authentication_required(
+                    "保存的密码无法重新登录，请手动输入最新密码",
+                ));
+            }
+        };
+        self.database.update_media_server_session(
+            server_id,
+            &verified.token,
+            &verified.user_id,
+            &verified.user_name,
+            None,
+            verified.server_version.as_deref(),
+        )?;
+        let updated = self.database.media_server(server_id)?;
+        let result = action(&RemoteClient::from_config(&updated, &device_id)?);
+        if result.as_ref().is_err_and(requires_authentication) {
+            self.database.clear_media_server_password(server_id)?;
+            return Err(authentication_required(
+                "服务器没有接受新登录会话，请手动重新登录",
+            ));
+        }
+        result
+    }
+
+    fn remote_device_id(&self) -> AppResult<String> {
+        if let Some(device_id) = self.database.setting(REMOTE_DEVICE_ID_SETTING)? {
+            if is_safe_remote_device_id(&device_id) {
+                return Ok(device_id);
+            }
+        }
+        let device_id = format!("mpv-enjoy-home-{}", Uuid::new_v4().simple());
+        self.database
+            .set_setting(REMOTE_DEVICE_ID_SETTING, Some(&device_id))?;
+        Ok(device_id)
+    }
+}
+
+fn is_safe_remote_device_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
 fn normalize_relative_path(value: &str) -> AppResult<String> {
@@ -389,7 +539,9 @@ fn video_entry(item: MediaItem, relative_path: String) -> LibraryEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{AccentColor, ThemeMode};
+    use crate::domain::{AccentColor, PlayerToggleMode, ThemeMode};
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
 
     #[test]
     fn relative_paths_cannot_escape_the_library() {
@@ -439,11 +591,190 @@ mod tests {
     }
 
     #[test]
+    fn player_preferences_default_to_inherit_and_persist() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mpv-enjoy-home-player-preferences-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let service = AppService::new(path.clone());
+        service.initialize().unwrap();
+        assert_eq!(
+            service.player_preferences().unwrap(),
+            PlayerPreferences::default()
+        );
+
+        let selected = PlayerPreferences {
+            startup_volume: Some(72),
+            fullscreen_mode: PlayerToggleMode::On,
+            danmaku_mode: PlayerToggleMode::Off,
+        };
+        assert_eq!(service.set_player_preferences(&selected).unwrap(), selected);
+        assert_eq!(service.player_preferences().unwrap(), selected);
+
+        let invalid = PlayerPreferences {
+            startup_volume: Some(101),
+            ..PlayerPreferences::default()
+        };
+        assert!(service.set_player_preferences(&invalid).is_err());
+        drop(service);
+
+        for candidate in [
+            path.clone(),
+            PathBuf::from(format!("{}-wal", path.display())),
+            PathBuf::from(format!("{}-shm", path.display())),
+        ] {
+            let _ = std::fs::remove_file(candidate);
+        }
+    }
+
+    #[test]
+    fn remote_device_id_is_generated_once_and_persisted() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mpv-enjoy-home-remote-device-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let service = AppService::new(path.clone());
+        service.initialize().unwrap();
+
+        let first = service.remote_device_id().unwrap();
+        let second = service.remote_device_id().unwrap();
+        assert_eq!(first, second);
+        assert!(first.starts_with("mpv-enjoy-home-"));
+        assert!(is_safe_remote_device_id(&first));
+
+        drop(service);
+        for candidate in [
+            path.clone(),
+            PathBuf::from(format!("{}-wal", path.display())),
+            PathBuf::from(format!("{}-shm", path.display())),
+        ] {
+            let _ = std::fs::remove_file(candidate);
+        }
+    }
+
+    #[test]
+    #[ignore = "需要绑定本机回环端口"]
+    fn revoked_remote_token_is_refreshed_with_the_saved_password() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let mock = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for index in 0..5 {
+                let (mut stream, _) = listener.accept().unwrap();
+                requests.push(read_http_request(&mut stream));
+                let (status, body) = match index {
+                    0 => ("401 Unauthorized", ""),
+                    1 => (
+                        "200 OK",
+                        r#"{"User":{"Id":"new-user-id","Name":"Guest"},"AccessToken":"new-token"}"#,
+                    ),
+                    2 => ("200 OK", r#"{"ServerName":"Mock Emby","Version":"4.9.0"}"#),
+                    _ => ("200 OK", r#"{"Items":[]}"#),
+                };
+                write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+                stream.flush().unwrap();
+            }
+            requests
+        });
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mpv-enjoy-home-auto-login-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let service = AppService::new(path.clone());
+        service.initialize().unwrap();
+        let saved = service
+            .database
+            .save_media_server(
+                "emby",
+                "Mock Emby",
+                &format!("http://{address}"),
+                "revoked-token",
+                "old-user-id",
+                "Guest",
+                "saved-password",
+                Some("4.8.0"),
+            )
+            .unwrap();
+
+        assert!(
+            service
+                .list_remote_entries(saved.id, None)
+                .unwrap()
+                .is_empty()
+        );
+        let requests = mock.join().unwrap();
+        assert!(requests[0].starts_with("GET /emby/Users/old-user-id/Views"));
+        assert!(requests[1].starts_with("POST /emby/Users/AuthenticateByName"));
+        assert!(requests[1].contains(r#""Pw":"saved-password""#));
+        let refreshed = service.database.media_server(saved.id).unwrap();
+        assert_eq!(refreshed.token, "new-token");
+        assert_eq!(refreshed.user_id, "new-user-id");
+        assert_eq!(refreshed.password.as_deref(), Some("saved-password"));
+
+        drop(service);
+        for candidate in [
+            path.clone(),
+            PathBuf::from(format!("{}-wal", path.display())),
+            PathBuf::from(format!("{}-shm", path.display())),
+        ] {
+            let _ = std::fs::remove_file(candidate);
+        }
+    }
+
+    #[test]
     fn parent_matching_respects_path_boundaries() {
         assert_eq!(
             strip_parent("Show/Season/file.mkv", "Show"),
             Some("Season/file.mkv")
         );
         assert_eq!(strip_parent("Showcase/file.mkv", "Show"), None);
+    }
+
+    fn read_http_request(stream: &mut TcpStream) -> String {
+        let mut bytes = Vec::new();
+        let mut buffer = [0_u8; 2048];
+        loop {
+            let count = stream.read(&mut buffer).unwrap();
+            if count == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&buffer[..count]);
+            let Some(header_end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") else {
+                continue;
+            };
+            let header_end = header_end + 4;
+            let headers = String::from_utf8_lossy(&bytes[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+                .unwrap_or_default();
+            if bytes.len() >= header_end + content_length {
+                break;
+            }
+        }
+        String::from_utf8(bytes).unwrap()
     }
 }

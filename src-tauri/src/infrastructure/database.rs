@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -60,12 +60,13 @@ impl Database {
                      token TEXT NOT NULL,
                      user_id TEXT NOT NULL,
                      user_name TEXT NOT NULL,
+                     password TEXT,
                      server_version TEXT,
                      added_at INTEGER NOT NULL,
                      last_connected_at INTEGER,
                      UNIQUE(kind, base_url, user_id)
                  );
-                 PRAGMA user_version = 2;
+                 PRAGMA user_version = 3;
                  COMMIT;",
             )?;
         }
@@ -81,12 +82,21 @@ impl Database {
                      token TEXT NOT NULL,
                      user_id TEXT NOT NULL,
                      user_name TEXT NOT NULL,
+                     password TEXT,
                      server_version TEXT,
                      added_at INTEGER NOT NULL,
                      last_connected_at INTEGER,
                      UNIQUE(kind, base_url, user_id)
                  );
-                 PRAGMA user_version = 2;
+                 PRAGMA user_version = 3;
+                 COMMIT;",
+            )?;
+        }
+        if version == 2 {
+            connection.execute_batch(
+                "BEGIN;
+                 ALTER TABLE media_servers ADD COLUMN password TEXT;
+                 PRAGMA user_version = 3;
                  COMMIT;",
             )?;
         }
@@ -100,6 +110,7 @@ impl Database {
              PRAGMA journal_mode = WAL;
              PRAGMA busy_timeout = 5000;",
         )?;
+        restrict_database_file_permissions(&self.path)?;
         Ok(connection)
     }
 
@@ -344,19 +355,21 @@ impl Database {
         token: &str,
         user_id: &str,
         user_name: &str,
+        password: &str,
         server_version: Option<&str>,
     ) -> AppResult<MediaServerSummary> {
         let connection = self.open()?;
         let now = now_timestamp();
         connection.execute(
             "INSERT INTO media_servers(
-                 kind, name, base_url, token, user_id, user_name,
+                 kind, name, base_url, token, user_id, user_name, password,
                  server_version, added_at, last_connected_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
              ON CONFLICT(kind, base_url, user_id) DO UPDATE SET
                  name = excluded.name,
                  token = excluded.token,
                  user_name = excluded.user_name,
+                 password = excluded.password,
                  server_version = excluded.server_version,
                  last_connected_at = excluded.last_connected_at",
             params![
@@ -366,6 +379,7 @@ impl Database {
                 token,
                 user_id,
                 user_name,
+                password,
                 server_version,
                 now
             ],
@@ -409,7 +423,7 @@ impl Database {
         connection
             .query_row(
                 "SELECT id, kind, name, base_url, token, user_id, user_name,
-                        server_version, added_at, last_connected_at
+                        password, server_version, added_at, last_connected_at
                  FROM media_servers WHERE id = ?1",
                 [server_id],
                 |row| {
@@ -421,9 +435,10 @@ impl Database {
                         token: row.get(4)?,
                         user_id: row.get(5)?,
                         user_name: row.get(6)?,
-                        server_version: row.get(7)?,
-                        added_at: row.get(8)?,
-                        last_connected_at: row.get(9)?,
+                        password: row.get(7)?,
+                        server_version: row.get(8)?,
+                        added_at: row.get(9)?,
+                        last_connected_at: row.get(10)?,
                     })
                 },
             )
@@ -437,6 +452,50 @@ impl Database {
             "UPDATE media_servers SET last_connected_at = ?1 WHERE id = ?2",
             params![now_timestamp(), server_id],
         )?;
+        Ok(())
+    }
+
+    pub fn update_media_server_session(
+        &self,
+        server_id: i64,
+        token: &str,
+        user_id: &str,
+        user_name: &str,
+        password: Option<&str>,
+        server_version: Option<&str>,
+    ) -> AppResult<MediaServerSummary> {
+        let connection = self.open()?;
+        if connection.execute(
+            "UPDATE media_servers
+             SET token = ?1, user_id = ?2, user_name = ?3,
+                 password = COALESCE(?4, password), server_version = ?5,
+                 last_connected_at = ?6
+             WHERE id = ?7",
+            params![
+                token,
+                user_id,
+                user_name,
+                password,
+                server_version,
+                now_timestamp(),
+                server_id
+            ],
+        )? == 0
+        {
+            return Err(AppError::message("媒体服务器不存在"));
+        }
+        self.media_server(server_id).map(Into::into)
+    }
+
+    pub fn clear_media_server_password(&self, server_id: i64) -> AppResult<()> {
+        let connection = self.open()?;
+        if connection.execute(
+            "UPDATE media_servers SET password = NULL WHERE id = ?1",
+            [server_id],
+        )? == 0
+        {
+            return Err(AppError::message("媒体服务器不存在"));
+        }
         Ok(())
     }
 
@@ -454,6 +513,33 @@ fn now_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+#[cfg(unix)]
+fn restrict_database_file_permissions(path: &Path) -> AppResult<()> {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    for candidate in [
+        path.to_path_buf(),
+        PathBuf::from(format!("{}-wal", path.display())),
+        PathBuf::from(format!("{}-shm", path.display())),
+    ] {
+        let Ok(metadata) = fs::metadata(&candidate) else {
+            continue;
+        };
+        let mut permissions = metadata.permissions();
+        if permissions.mode() & 0o077 != 0 {
+            permissions.set_mode(0o600);
+            fs::set_permissions(candidate, permissions)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restrict_database_file_permissions(_path: &Path) -> AppResult<()> {
+    Ok(())
 }
 
 #[cfg(test)]
@@ -513,6 +599,129 @@ mod tests {
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
         drop(connection);
+
+        for candidate in [
+            path.clone(),
+            PathBuf::from(format!("{}-wal", path.display())),
+            PathBuf::from(format!("{}-shm", path.display())),
+        ] {
+            let _ = std::fs::remove_file(candidate);
+        }
+    }
+
+    #[test]
+    fn refreshes_a_media_server_session_without_replacing_the_connection() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mpv-enjoy-home-server-session-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let database = Database::new(path.clone());
+        database.initialize().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o077,
+                0
+            );
+        }
+        let saved = database
+            .save_media_server(
+                "jellyfin",
+                "HomeHub",
+                "https://media.example",
+                "old-token",
+                "old-user-id",
+                "Guest",
+                "old-password",
+                Some("10.10.0"),
+            )
+            .unwrap();
+
+        let refreshed = database
+            .update_media_server_session(
+                saved.id,
+                "new-token",
+                "new-user-id",
+                "Guest",
+                Some("new-password"),
+                Some("10.11.0"),
+            )
+            .unwrap();
+        let config = database.media_server(saved.id).unwrap();
+
+        assert_eq!(refreshed.id, saved.id);
+        assert_eq!(refreshed.added_at, saved.added_at);
+        assert_eq!(refreshed.user_id, "new-user-id");
+        assert_eq!(refreshed.server_version.as_deref(), Some("10.11.0"));
+        assert_eq!(config.token, "new-token");
+        assert_eq!(config.password.as_deref(), Some("new-password"));
+        database.clear_media_server_password(saved.id).unwrap();
+        assert_eq!(database.media_server(saved.id).unwrap().password, None);
+
+        drop(database);
+        for candidate in [
+            path.clone(),
+            PathBuf::from(format!("{}-wal", path.display())),
+            PathBuf::from(format!("{}-shm", path.display())),
+        ] {
+            let _ = std::fs::remove_file(candidate);
+        }
+    }
+
+    #[test]
+    fn migrates_v2_servers_without_inventing_saved_passwords() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mpv-enjoy-home-password-migration-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE media_servers (
+                         id INTEGER PRIMARY KEY,
+                         kind TEXT NOT NULL,
+                         name TEXT NOT NULL,
+                         base_url TEXT NOT NULL,
+                         token TEXT NOT NULL,
+                         user_id TEXT NOT NULL,
+                         user_name TEXT NOT NULL,
+                         server_version TEXT,
+                         added_at INTEGER NOT NULL,
+                         last_connected_at INTEGER,
+                         UNIQUE(kind, base_url, user_id)
+                     );
+                     INSERT INTO media_servers(
+                         id, kind, name, base_url, token, user_id, user_name, added_at
+                     ) VALUES (
+                         1, 'emby', 'HomeHub', 'https://media.example',
+                         'token', 'user-id', 'Guest', 1
+                     );
+                     PRAGMA user_version = 2;",
+                )
+                .unwrap();
+        }
+
+        let database = Database::new(path.clone());
+        database.initialize().unwrap();
+        let server = database.media_server(1).unwrap();
+        assert_eq!(server.password, None);
+        let connection = Connection::open(&path).unwrap();
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        drop(connection);
+        drop(database);
 
         for candidate in [
             path.clone(),

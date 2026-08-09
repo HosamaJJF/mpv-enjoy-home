@@ -1,12 +1,13 @@
 :root {
   font-family:
-    Inter,
-    ui-sans-serif,
+    system-ui,
     -apple-system,
     BlinkMacSystemFont,
+    'Segoe UI Variable',
     'Segoe UI',
-    'PingFang SC',
+    'Microsoft YaHei UI',
     'Microsoft YaHei',
+    'PingFang SC',
     sans-serif;
   color: #272338;
   background: #fff;
@@ -20,7 +21,7 @@
   --accent-gradient-end: #2563eb;
   --text: #272338;
   --muted: #777287;
-  --faint: #aaa5b7;
+  --faint: #918b9f;
   --surface: #fff;
   --surface-solid: #fff;
   --line: rgba(47, 39, 72, 0.09);
@@ -28,6 +29,13 @@
   --radius-lg: 24px;
   --radius-md: 16px;
   --content-max: 1400px;
+  --font-caption: 11px;
+  --font-meta: 12px;
+  --font-small: 13px;
+  --font-body: 14px;
+  --font-subtitle: 16px;
+  --font-section: 18px;
+  --font-heading: 20px;
 }
 
 :root[data-accent='pink'] {
@@ -142,7 +150,7 @@ nav button em {
   border-radius: 10px;
   color: var(--accent-strong);
   background: rgba(255, 255, 255, 0.78);
-  font-size: 11px;
+  font-size: var(--font-small);
   font-style: normal;
   text-align: center;
 }
@@ -158,7 +166,7 @@ nav button em {
   border-radius: 11px;
   color: var(--faint);
   background: transparent;
-  font-size: 11px;
+  font-size: var(--font-small);
   cursor: pointer;
   transition: 150ms ease;
 }
@@ -192,7 +200,7 @@ nav button em {
 .version {
   padding: 12px 6px 0;
   color: var(--faint);
-  font-size: 10px;
+  font-size: var(--font-meta);
   text-align: center;
   white-space: nowrap;
 }
@@ -221,8 +229,8 @@ main {
   display: block;
   margin-bottom: 7px;
   color: var(--accent);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--font-small);
+  font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -243,7 +251,7 @@ h1 {
   margin-bottom: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--font-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -256,8 +264,8 @@ button.secondary {
   min-height: 42px;
   padding: 0 17px;
   border-radius: 13px;
-  font-size: 13px;
-  font-weight: 750;
+  font-size: var(--font-body);
+  font-weight: 700;
   cursor: pointer;
   transition: 150ms ease;
 }
@@ -307,13 +315,13 @@ button.secondary:hover {
 }
 .section-heading h2 {
   margin-bottom: 4px;
-  font-size: 18px;
+  font-size: var(--font-heading);
   letter-spacing: -0.02em;
 }
 .section-heading p {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 .text-button {
   display: inline-flex;
@@ -322,8 +330,8 @@ button.secondary:hover {
   border: 0;
   color: var(--accent);
   background: transparent;
-  font-size: 12px;
-  font-weight: 750;
+  font-size: var(--font-body);
+  font-weight: 700;
   cursor: pointer;
 }
 .folder-grid {
@@ -377,7 +385,7 @@ button.secondary:hover {
 }
 .folder-copy strong {
   overflow: hidden;
-  font-size: 14px;
+  font-size: var(--font-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -385,14 +393,14 @@ button.secondary:hover {
   margin-top: 5px;
   overflow: hidden;
   color: var(--faint);
-  font-size: 10px;
+  font-size: var(--font-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .folder-copy > span {
   margin-top: 9px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-meta);
 }
 .round-play {
   display: grid;
@@ -457,13 +465,13 @@ button.secondary:hover {
 }
 .empty-state h3 {
   margin-bottom: 8px;
-  font-size: 17px;
+  font-size: var(--font-section);
 }
 .empty-state p {
   max-width: 380px;
   margin-bottom: 20px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-body);
   line-height: 1.6;
 }
 .library-empty {
@@ -516,9 +524,9 @@ button.secondary:hover {
   border-radius: 6px;
   color: rgba(68, 42, 126, 0.72);
   background: rgba(255, 255, 255, 0.58);
-  font-size: 8px;
+  font-size: var(--font-caption);
   font-style: normal;
-  font-weight: 800;
+  font-weight: 700;
   text-transform: uppercase;
 }
 .poster-art i {
@@ -546,8 +554,8 @@ button.secondary:hover {
   display: block;
   margin-top: 9px;
   overflow: hidden;
-  font-size: 11px;
-  font-weight: 650;
+  font-size: var(--font-small);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -577,7 +585,7 @@ button.secondary:hover {
   border-radius: 10px;
   color: var(--muted);
   background: rgba(255, 255, 255, 0.7);
-  font-size: 11px;
+  font-size: var(--font-small);
   cursor: pointer;
 }
 .folder-switcher button.active {
@@ -591,7 +599,7 @@ button.secondary:hover {
   border-radius: 6px;
   color: var(--faint);
   background: rgba(255, 255, 255, 0.72);
-  font-size: 9px;
+  font-size: var(--font-meta);
 }
 .search-box {
   display: flex;
@@ -616,13 +624,13 @@ button.secondary:hover {
   outline: 0;
   color: var(--text);
   background: transparent;
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 .search-box button {
   border: 0;
   color: var(--faint);
   background: transparent;
-  font-size: 18px;
+  font-size: var(--font-heading);
   cursor: pointer;
 }
 .media-list {
@@ -655,7 +663,7 @@ button.secondary:hover {
 }
 .list-index {
   color: var(--faint);
-  font-size: 10px;
+  font-size: var(--font-meta);
   font-variant-numeric: tabular-nums;
 }
 .list-thumb {
@@ -699,18 +707,18 @@ button.secondary:hover {
   white-space: nowrap;
 }
 .list-copy strong {
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 .list-copy small {
   margin-top: 6px;
   color: var(--faint);
-  font-size: 9px;
+  font-size: var(--font-meta);
 }
 .media-list-item > em {
   color: var(--faint);
-  font-size: 9px;
+  font-size: var(--font-meta);
   font-style: normal;
-  font-weight: 800;
+  font-weight: 700;
   text-align: center;
 }
 .list-play {
@@ -764,15 +772,15 @@ button.secondary:hover {
 }
 .settings-title h2 {
   margin: 1px 0 0;
-  font-size: 17px;
+  font-size: var(--font-section);
 }
 .settings-title span {
   padding: 4px 8px;
   border-radius: 8px;
   color: #9a7828;
   background: #f8efd7;
-  font-size: 9px;
-  font-weight: 800;
+  font-size: var(--font-meta);
+  font-weight: 700;
 }
 .settings-title span.available {
   color: #28764e;
@@ -781,7 +789,7 @@ button.secondary:hover {
 .settings-copy > p {
   margin: 8px 0 20px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-body);
   line-height: 1.6;
 }
 .settings-copy dl {
@@ -795,7 +803,7 @@ button.secondary:hover {
   grid-template-columns: 90px minmax(0, 1fr);
   padding: 10px 13px;
   border-bottom: 1px solid var(--line);
-  font-size: 11px;
+  font-size: var(--font-small);
 }
 .settings-copy dl div:last-child {
   border-bottom: 0;
@@ -815,6 +823,81 @@ button.secondary:hover {
   gap: 9px;
   margin-top: 17px;
 }
+.player-preferences {
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.preference-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(250px, 330px);
+  align-items: center;
+  gap: 20px;
+  min-height: 66px;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--line);
+}
+.preference-row:last-child {
+  border-bottom: 0;
+}
+.preference-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.preference-copy strong {
+  font-size: var(--font-small);
+  font-weight: 600;
+}
+.preference-copy small {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: 1.45;
+}
+.preference-select {
+  width: 100%;
+  height: 40px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface-solid);
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+.preference-select:disabled {
+  cursor: default;
+}
+.volume-preference {
+  display: grid;
+  grid-template-columns: auto minmax(90px, 1fr) 72px;
+  align-items: center;
+  gap: 10px;
+}
+.volume-preference input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.volume-preference output {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.override-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.override-toggle input {
+  accent-color: var(--accent);
+}
 .appearance-settings {
   overflow: hidden;
   border: 1px solid var(--line);
@@ -833,7 +916,7 @@ button.secondary:hover {
 }
 .appearance-label {
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--font-small);
 }
 .theme-options {
   display: grid;
@@ -854,7 +937,7 @@ button.secondary:hover {
   min-height: 34px;
   padding: 0 10px;
   border-radius: 9px;
-  font-size: 11px;
+  font-size: var(--font-small);
   font-weight: 700;
 }
 .theme-options button:hover,
@@ -899,7 +982,7 @@ button.secondary:hover {
 }
 .accent-options button em {
   overflow: hidden;
-  font-size: 9px;
+  font-size: var(--font-meta);
   font-style: normal;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -1000,22 +1083,22 @@ button.secondary:hover {
 }
 .source-copy strong {
   margin-top: 3px;
-  font-size: 14px;
+  font-size: var(--font-body);
 }
 .source-copy small {
   margin-top: 4px;
   color: var(--faint);
-  font-size: 10px;
+  font-size: var(--font-meta);
 }
 .source-copy > span:last-child {
   margin-top: 8px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-meta);
 }
 .source-kind {
   color: var(--accent);
-  font-size: 9px;
-  font-weight: 800;
+  font-size: var(--font-meta);
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -1094,17 +1177,17 @@ button.secondary:hover {
   background: #e6f4f8;
 }
 .recent-copy strong {
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 .recent-copy small {
   margin-top: 4px;
   color: var(--faint);
-  font-size: 9px;
+  font-size: var(--font-meta);
 }
 .recent-copy span {
   margin-top: 6px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--font-meta);
 }
 
 .source-picker-section {
@@ -1135,7 +1218,7 @@ button.secondary:hover {
   border-radius: 6px;
   color: var(--muted);
   background: transparent;
-  font-size: 10px;
+  font-size: var(--font-meta);
   cursor: pointer;
 }
 .breadcrumbs button:hover {
@@ -1154,7 +1237,7 @@ button.secondary:hover {
 .browser-section h2 {
   margin-bottom: 11px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-small);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -1180,14 +1263,14 @@ button.secondary:hover {
 }
 .browser-card strong {
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--font-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .browser-card small {
   margin-top: 6px;
   color: var(--faint);
-  font-size: 9px;
+  font-size: var(--font-meta);
 }
 .media-list-item.no-thumb {
   grid-template-columns: 34px minmax(0, 1fr) 60px 34px;
@@ -1207,7 +1290,7 @@ button.secondary:hover {
   max-width: var(--content-max);
   margin: 0 auto;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-small);
 }
 .spinner.small {
   width: 22px;
@@ -1288,7 +1371,7 @@ button.secondary:hover {
 .remote-copy strong {
   margin-top: 4px;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--font-body);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1298,7 +1381,7 @@ button.secondary:hover {
   margin-top: 6px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--font-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1419,8 +1502,8 @@ button.secondary:hover {
   border-radius: 8px;
   color: rgba(255, 255, 255, 0.8);
   background: rgba(11, 9, 16, 0.2);
-  font-size: 9px;
-  font-weight: 750;
+  font-size: var(--font-meta);
+  font-weight: 700;
   backdrop-filter: blur(8px);
 }
 .detail-labels span.watched {
@@ -1438,7 +1521,7 @@ button.secondary:hover {
 .detail-copy .tagline {
   margin: 0 0 14px;
   color: rgba(255, 255, 255, 0.67);
-  font-size: 11px;
+  font-size: var(--font-small);
   font-style: italic;
 }
 .detail-meta {
@@ -1450,7 +1533,7 @@ button.secondary:hover {
   margin: 0;
   overflow: hidden;
   color: rgba(255, 255, 255, 0.78);
-  font-size: 11px;
+  font-size: var(--font-small);
   line-height: 1.75;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 5;
@@ -1505,44 +1588,44 @@ button.secondary:hover {
 }
 .detail-section-heading h3 {
   margin: 5px 0 0;
-  font-size: 20px;
+  font-size: var(--font-heading);
 }
 .detail-section-heading > small {
   color: var(--faint);
-  font-size: 9px;
+  font-size: var(--font-meta);
 }
 .season-selector {
-  display: flex;
-  max-width: 64%;
-  gap: 7px;
-  overflow-x: auto;
-  padding: 2px;
-}
-.season-selector button {
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  padding: 8px 11px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  display: grid;
+  width: min(100%, 300px);
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
   color: var(--muted);
-  background: var(--surface-solid);
-  cursor: pointer;
-}
-.season-selector button.active {
-  color: var(--accent-strong);
-  border-color: rgb(var(--accent-rgb) / 0.3);
-  background: var(--accent-soft);
 }
 .season-selector span {
-  font-size: 10px;
-  font-weight: 750;
-}
-.season-selector small {
   color: var(--faint);
-  font-size: 8px;
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+.season-selector select {
+  min-width: 0;
+  width: 100%;
+  height: 42px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  outline: 0;
+  color: var(--text);
+  background: var(--surface-solid);
+  font-size: var(--font-small);
+  cursor: pointer;
+}
+.season-selector select:hover {
+  border-color: rgb(var(--accent-rgb) / 0.28);
+}
+.season-selector select:focus-visible {
+  border-color: rgb(var(--accent-rgb) / 0.38);
+  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.08);
 }
 .season-summary {
   display: grid;
@@ -1564,19 +1647,19 @@ button.secondary:hover {
 }
 .season-state {
   color: var(--accent);
-  font-size: 9px;
-  font-weight: 800;
+  font-size: var(--font-meta);
+  font-weight: 700;
 }
 .season-summary h4 {
   margin: 6px 0 7px;
-  font-size: 15px;
+  font-size: var(--font-subtitle);
 }
 .season-summary p {
   display: -webkit-box;
   margin: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-meta);
   line-height: 1.7;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 5;
@@ -1628,7 +1711,7 @@ button.secondary:hover {
   border-radius: 50%;
   color: #fff;
   background: #46a96e;
-  font-size: 10px;
+  font-size: var(--font-meta);
   font-style: normal;
 }
 .episode-progress {
@@ -1652,13 +1735,13 @@ button.secondary:hover {
 }
 .episode-meta {
   color: var(--accent);
-  font-size: 8px;
-  font-weight: 800;
+  font-size: var(--font-caption);
+  font-weight: 700;
 }
 .episode-copy strong {
   margin-top: 5px;
   overflow: hidden;
-  font-size: 11px;
+  font-size: var(--font-small);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1667,7 +1750,7 @@ button.secondary:hover {
   margin-top: 7px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--font-meta);
   line-height: 1.55;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
@@ -1695,8 +1778,8 @@ button.secondary:hover {
   border-radius: 21px;
   color: var(--accent);
   background: var(--accent-soft);
-  font-size: 18px;
-  font-weight: 800;
+  font-size: var(--font-heading);
+  font-weight: 700;
 }
 .person-card > span img {
   position: absolute;
@@ -1715,12 +1798,12 @@ button.secondary:hover {
 }
 .person-card strong {
   margin-top: 8px;
-  font-size: 9px;
+  font-size: var(--font-meta);
 }
 .person-card small {
   margin-top: 3px;
   color: var(--faint);
-  font-size: 8px;
+  font-size: var(--font-caption);
 }
 .server-list {
   display: grid;
@@ -1743,17 +1826,17 @@ button.secondary:hover {
   border-radius: 7px;
   color: #2c7893;
   background: #e5f4f8;
-  font-size: 8px;
-  font-weight: 800;
+  font-size: var(--font-caption);
+  font-weight: 700;
   text-transform: uppercase;
 }
 .server-list-copy strong {
-  font-size: 11px;
+  font-size: var(--font-small);
 }
 .server-list-copy small {
   margin-top: 4px;
   color: var(--faint);
-  font-size: 9px;
+  font-size: var(--font-meta);
 }
 .server-form {
   display: grid;
@@ -1773,7 +1856,7 @@ button.secondary:hover {
 }
 .server-form label > span {
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-meta);
   font-weight: 700;
 }
 .server-form input,
@@ -1786,21 +1869,28 @@ button.secondary:hover {
   outline: 0;
   color: var(--text);
   background: var(--surface-solid);
-  font-size: 11px;
+  font-size: var(--font-small);
 }
 .server-form input:focus,
 .server-form select:focus {
   border-color: rgb(var(--accent-rgb) / 0.36);
   box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.08);
 }
+.server-form input:read-only,
+.server-form select:disabled {
+  color: var(--muted);
+  background: rgb(var(--accent-rgb) / 0.055);
+  opacity: 1;
+  cursor: default;
+}
 .server-form label > small {
   color: var(--faint);
-  font-size: 9px;
+  font-size: var(--font-meta);
 }
 .server-form .form-note {
   margin: -3px 0 0;
-  color: var(--faint);
-  font-size: 9px;
+  color: var(--muted);
+  font-size: var(--font-meta);
   line-height: 1.55;
 }
 .server-form .wide {
@@ -1827,12 +1917,12 @@ button.secondary:hover {
 }
 .busy-layer strong {
   margin-top: 17px;
-  font-size: 14px;
+  font-size: var(--font-body);
 }
 .busy-layer span {
   margin-top: 6px;
   color: rgba(255, 255, 255, 0.62);
-  font-size: 10px;
+  font-size: var(--font-meta);
 }
 .spinner {
   width: 34px;
@@ -1857,8 +1947,8 @@ button.secondary:hover {
   color: #245b3e;
   background: rgba(235, 251, 242, 0.96);
   box-shadow: var(--shadow);
-  font-size: 11px;
-  font-weight: 650;
+  font-size: var(--font-small);
+  font-weight: 600;
 }
 .toast > span {
   display: grid;
@@ -1912,9 +2002,6 @@ button.secondary:hover {
   .detail-overview {
     -webkit-line-clamp: 4;
   }
-  .season-selector {
-    max-width: 58%;
-  }
 }
 @media (max-width: 760px) {
   .detail-hero-content {
@@ -1933,7 +2020,11 @@ button.secondary:hover {
     flex-direction: column;
   }
   .season-selector {
-    max-width: 100%;
+    width: 100%;
+  }
+  .preference-row {
+    grid-template-columns: 1fr;
+    gap: 9px;
   }
   .season-summary {
     grid-template-columns: 82px minmax(0, 1fr);
@@ -1957,7 +2048,7 @@ button.secondary:hover {
   background: #181818;
   --text: #eeebf5;
   --muted: #a9a4b5;
-  --faint: #777181;
+  --faint: #948d9f;
   --surface: #232323;
   --surface-solid: #292929;
   --line: rgba(255, 255, 255, 0.08);
