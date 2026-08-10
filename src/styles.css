@@ -88,7 +88,8 @@ button {
 }
 button:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+summary:focus-visible {
   outline: 3px solid rgb(var(--accent-rgb) / 0.28);
   outline-offset: 2px;
 }
@@ -885,6 +886,71 @@ button.secondary:hover {
   font-size: var(--font-meta);
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+.danmaku-style-preferences summary {
+  display: grid;
+  min-height: 66px;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 11px 13px;
+  list-style: none;
+  cursor: pointer;
+}
+.danmaku-style-preferences summary::-webkit-details-marker {
+  display: none;
+}
+.details-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+.details-hint::after {
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  content: '';
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 160ms ease;
+}
+.danmaku-style-preferences[open] .details-hint::after {
+  transform: rotate(225deg) translate(-2px, -2px);
+}
+.danmaku-style-rows {
+  border-top: 1px solid var(--line);
+}
+.danmaku-style-row {
+  display: grid;
+  min-height: 62px;
+  grid-template-columns: minmax(180px, 1fr) minmax(250px, 330px);
+  align-items: center;
+  gap: 20px;
+  padding: 10px 13px 10px 25px;
+  border-bottom: 1px solid var(--line);
+}
+.danmaku-style-row:last-child {
+  border-bottom: 0;
+}
+.range-preference {
+  display: grid;
+  grid-template-columns: auto minmax(90px, 1fr) 58px;
+  align-items: center;
+  gap: 10px;
+}
+.range-preference input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.range-preference output {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
 }
 .override-toggle {
   display: inline-flex;
@@ -2025,6 +2091,17 @@ button.secondary:hover {
   .preference-row {
     grid-template-columns: 1fr;
     gap: 9px;
+  }
+  .danmaku-style-preferences summary,
+  .danmaku-style-row {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+  .danmaku-style-row {
+    padding-left: 13px;
+  }
+  .danmaku-style-preferences summary {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
   .season-summary {
     grid-template-columns: 82px minmax(0, 1fr);

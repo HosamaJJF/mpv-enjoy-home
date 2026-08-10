@@ -238,12 +238,25 @@ pub enum PlayerToggleMode {
     Off,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DanmakuStylePreferences {
+    pub bold_mode: PlayerToggleMode,
+    pub font_size: Option<u8>,
+    pub outline: Option<f64>,
+    pub shadow: Option<u8>,
+    pub scroll_time: Option<u8>,
+    pub opacity: Option<f64>,
+    pub display_area: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PlayerPreferences {
     pub startup_volume: Option<u8>,
     pub fullscreen_mode: PlayerToggleMode,
     pub danmaku_mode: PlayerToggleMode,
+    pub danmaku_style: DanmakuStylePreferences,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -339,5 +352,18 @@ mod tests {
         let mut names = vec!["Episode 10", "Episode 2", "Episode 01"];
         names.sort_by(|left, right| natural_cmp(left, right));
         assert_eq!(names, vec!["Episode 01", "Episode 2", "Episode 10"]);
+    }
+
+    #[test]
+    fn older_player_preferences_default_new_danmaku_style_fields() {
+        let preferences: PlayerPreferences = serde_json::from_str(
+            r#"{"startupVolume":72,"fullscreenMode":"on","danmakuMode":"off"}"#,
+        )
+        .unwrap();
+        assert_eq!(preferences.startup_volume, Some(72));
+        assert_eq!(
+            preferences.danmaku_style,
+            DanmakuStylePreferences::default()
+        );
     }
 }

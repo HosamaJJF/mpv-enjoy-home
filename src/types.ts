@@ -143,10 +143,21 @@ export interface PlayerStatus {
 
 export type PlayerToggleMode = 'inherit' | 'on' | 'off';
 
+export interface DanmakuStylePreferences {
+  boldMode: PlayerToggleMode;
+  fontSize: number | null;
+  outline: number | null;
+  shadow: number | null;
+  scrollTime: number | null;
+  opacity: number | null;
+  displayArea: number | null;
+}
+
 export interface PlayerPreferences {
   startupVolume: number | null;
   fullscreenMode: PlayerToggleMode;
   danmakuMode: PlayerToggleMode;
+  danmakuStyle: DanmakuStylePreferences;
 }
 
 export type ThemeMode = 'system' | 'light' | 'dark';
