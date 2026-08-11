@@ -1,6 +1,6 @@
 [package]
 name = "mpv-enjoy-home"
-version = "1.0.1"
+version = "1.0.2"
 description = "A lightweight, reusable media home for mpv distributions"
 authors = ["HosamaJJF"]
 edition = "2024"
