@@ -1274,9 +1274,47 @@ button.secondary:hover {
   flex: 1;
   margin: 0;
 }
-.context-toolbar .search-box {
-  flex: 0 1 300px;
-  width: 300px;
+.library-controls {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 470px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+.context-toolbar .library-controls .search-box {
+  min-width: 170px;
+  flex: 1 1 280px;
+  width: auto;
+}
+.sort-control {
+  display: flex;
+  height: 40px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--faint);
+  background: var(--surface-solid);
+}
+.sort-control:focus-within {
+  border-color: rgb(var(--accent-rgb) / 0.36);
+  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.08);
+}
+.sort-control > span {
+  font-size: var(--font-meta);
+  font-weight: 700;
+}
+.sort-control select {
+  max-width: 112px;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: var(--font-small);
+  cursor: pointer;
 }
 .breadcrumbs button {
   padding: 3px 5px;

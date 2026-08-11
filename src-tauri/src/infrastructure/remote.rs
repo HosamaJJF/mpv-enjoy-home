@@ -11,7 +11,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
@@ -20,6 +20,8 @@ const EMBY_AUTHORIZATION_HEADER: &str = "X-Emby-Authorization";
 const CLIENT_NAME: &str = "mpv-enjoy Home";
 const DEVICE_NAME: &str = "Desktop";
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+const SERIES_UPDATE_PAGE_LIMIT: usize = 2_000;
+const MAX_SERIES_UPDATE_ITEMS: usize = 100_000;
 const AUTHENTICATION_REQUIRED_MARKER: &str = "REMOTE_AUTHENTICATION_REQUIRED:";
 
 #[derive(Debug, Clone)]
@@ -119,6 +121,7 @@ struct AuthenticationResult {
 struct QueryResult {
     #[serde(default)]
     items: Vec<BaseItem>,
+    total_record_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -305,7 +308,7 @@ impl RemoteClient {
     }
 
     pub fn list_entries(&self, parent_id: Option<&str>) -> AppResult<Vec<RemoteLibraryEntry>> {
-        let items = if let Some(parent_id) = parent_id {
+        let (items, is_library_root) = if let Some(parent_id) = parent_id {
             validate_identifier(parent_id, "远程目录")?;
             let parent: BaseItem = self.get_json(
                 &["Users", &self.user_id, "Items", parent_id],
@@ -327,11 +330,17 @@ impl RemoteClient {
                 ("ImageTypeLimit", "1"),
                 ("Limit", "2000"),
             ];
-            self.get_json::<QueryResult>(&["Users", &self.user_id, "Items"], &query)?
-                .items
+            (
+                self.get_json::<QueryResult>(&["Users", &self.user_id, "Items"], &query)?
+                    .items,
+                false,
+            )
         } else {
-            self.get_json::<QueryResult>(&["Users", &self.user_id, "Views"], &[])?
-                .items
+            (
+                self.get_json::<QueryResult>(&["Users", &self.user_id, "Views"], &[])?
+                    .items,
+                true,
+            )
         };
 
         let mut items = items
@@ -339,7 +348,96 @@ impl RemoteClient {
             .filter(is_video_or_container)
             .collect::<Vec<_>>();
         sort_remote_items(&mut items);
-        Ok(items.into_iter().map(to_library_entry).collect())
+        let series_ids = items
+            .iter()
+            .filter(|item| item.item_type == "Series")
+            .map(|item| item.id.clone())
+            .collect::<HashSet<_>>();
+        let series_updates = if let Some(parent_id) = parent_id {
+            self.series_updated_at(parent_id, &series_ids)?
+        } else {
+            HashMap::new()
+        };
+        items
+            .into_iter()
+            .map(|item| {
+                let mut entry = to_library_entry(item);
+                if is_library_root {
+                    entry.updated_at = self.library_updated_at(&entry.id)?;
+                } else if let Some(updated_at) = series_updates.get(&entry.id) {
+                    entry.updated_at = *updated_at;
+                }
+                Ok(entry)
+            })
+            .collect()
+    }
+
+    fn series_updated_at(
+        &self,
+        parent_id: &str,
+        series_ids: &HashSet<String>,
+    ) -> AppResult<HashMap<String, i64>> {
+        if series_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let mut updates = HashMap::new();
+        let mut start_index = 0_usize;
+        while start_index < MAX_SERIES_UPDATE_ITEMS {
+            let page_limit = SERIES_UPDATE_PAGE_LIMIT.min(MAX_SERIES_UPDATE_ITEMS - start_index);
+            let start_index_value = start_index.to_string();
+            let limit_value = page_limit.to_string();
+            let query = [
+                ("ParentId", parent_id),
+                ("Recursive", "true"),
+                ("IncludeItemTypes", "Episode"),
+                ("Fields", "DateCreated,SeriesId"),
+                ("SortBy", "DateCreated"),
+                ("SortOrder", "Descending"),
+                ("EnableImages", "false"),
+                ("StartIndex", start_index_value.as_str()),
+                ("Limit", limit_value.as_str()),
+            ];
+            let result =
+                self.get_json::<QueryResult>(&["Users", &self.user_id, "Items"], &query)?;
+            let item_count = result.items.len();
+            record_series_episode_updates(&mut updates, series_ids, &result.items);
+            start_index = start_index.saturating_add(item_count);
+
+            if updates.len() == series_ids.len()
+                || item_count == 0
+                || result
+                    .total_record_count
+                    .is_some_and(|total| start_index >= total)
+                || (result.total_record_count.is_none() && item_count < page_limit)
+            {
+                break;
+            }
+        }
+        Ok(updates)
+    }
+
+    fn library_updated_at(&self, library_id: &str) -> AppResult<i64> {
+        validate_identifier(library_id, "媒体库")?;
+        let query = [
+            ("ParentId", library_id),
+            ("Recursive", "true"),
+            ("IncludeItemTypes", "Episode,Movie,Video"),
+            ("Fields", "DateCreated"),
+            ("SortBy", "DateCreated"),
+            ("SortOrder", "Descending"),
+            ("EnableImages", "false"),
+            ("Limit", "1"),
+        ];
+        let latest = self
+            .get_json::<QueryResult>(&["Users", &self.user_id, "Items"], &query)?
+            .items
+            .into_iter()
+            .next();
+        Ok(latest
+            .as_ref()
+            .map(remote_item_updated_at)
+            .unwrap_or_default())
     }
 
     pub fn list_recent_media(&self, limit: usize) -> AppResult<Vec<RemoteRecentMedia>> {
@@ -967,12 +1065,7 @@ fn playback_title(item: &BaseItem) -> String {
 }
 
 fn remote_recent_media(item: BaseItem) -> Option<RemoteRecentMedia> {
-    let updated_at = item
-        .date_created
-        .as_deref()
-        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-        .map(|value| value.timestamp())
-        .unwrap_or_default();
+    let updated_at = remote_item_updated_at(&item);
     let (target_id, target_name, context) = if item.item_type == "Episode" {
         let target_id = item.series_id.clone()?;
         let target_name = item
@@ -1007,6 +1100,37 @@ fn remote_recent_media(item: BaseItem) -> Option<RemoteRecentMedia> {
         item_type: item.item_type,
         updated_at,
     })
+}
+
+fn remote_item_updated_at(item: &BaseItem) -> i64 {
+    item.date_created
+        .as_deref()
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.timestamp())
+        .unwrap_or_default()
+}
+
+fn record_series_episode_updates(
+    updates: &mut HashMap<String, i64>,
+    series_ids: &HashSet<String>,
+    episodes: &[BaseItem],
+) {
+    for episode in episodes {
+        let Some(series_id) = episode.series_id.as_ref() else {
+            continue;
+        };
+        if !series_ids.contains(series_id) {
+            continue;
+        }
+        let updated_at = remote_item_updated_at(episode);
+        if updated_at <= 0 {
+            continue;
+        }
+        updates
+            .entry(series_id.clone())
+            .and_modify(|current| *current = (*current).max(updated_at))
+            .or_insert(updated_at);
+    }
 }
 
 fn sort_remote_items(items: &mut [BaseItem]) {
@@ -1261,6 +1385,7 @@ fn is_video_or_container(item: &BaseItem) -> bool {
 }
 
 fn to_library_entry(item: BaseItem) -> RemoteLibraryEntry {
+    let updated_at = remote_item_updated_at(&item);
     let is_container = matches!(
         item.item_type.as_str(),
         "Folder" | "CollectionFolder" | "BoxSet"
@@ -1294,6 +1419,7 @@ fn to_library_entry(item: BaseItem) -> RemoteLibraryEntry {
         image_aspect_ratio: item.primary_image_aspect_ratio,
         index_number: item.index_number,
         parent_index_number: item.parent_index_number,
+        updated_at,
     }
 }
 
@@ -1457,6 +1583,59 @@ mod tests {
     }
 
     #[test]
+    fn aggregates_series_update_time_from_its_latest_episode() {
+        let series_ids = HashSet::from([
+            "series-a".to_string(),
+            "series-b".to_string(),
+            "series-without-episodes".to_string(),
+        ]);
+        let episodes = vec![
+            BaseItem {
+                series_id: Some("series-a".to_string()),
+                date_created: Some("2026-01-01T00:00:00Z".to_string()),
+                ..Default::default()
+            },
+            BaseItem {
+                series_id: Some("series-a".to_string()),
+                date_created: Some("2026-03-01T00:00:00Z".to_string()),
+                ..Default::default()
+            },
+            BaseItem {
+                series_id: Some("series-b".to_string()),
+                date_created: Some("2026-02-01T00:00:00Z".to_string()),
+                ..Default::default()
+            },
+            BaseItem {
+                series_id: Some("unlisted-series".to_string()),
+                date_created: Some("2026-04-01T00:00:00Z".to_string()),
+                ..Default::default()
+            },
+        ];
+        let mut updates = HashMap::new();
+
+        record_series_episode_updates(&mut updates, &series_ids, &episodes);
+
+        assert_eq!(
+            updates.get("series-a"),
+            Some(
+                &DateTime::parse_from_rfc3339("2026-03-01T00:00:00Z")
+                    .unwrap()
+                    .timestamp()
+            )
+        );
+        assert_eq!(
+            updates.get("series-b"),
+            Some(
+                &DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
+                    .unwrap()
+                    .timestamp()
+            )
+        );
+        assert!(!updates.contains_key("series-without-episodes"));
+        assert!(!updates.contains_key("unlisted-series"));
+    }
+
+    #[test]
     fn builds_direct_play_and_external_track_urls() {
         let remote = RemoteClient::build(
             "emby",
@@ -1592,10 +1771,12 @@ mod tests {
             item_type: "Series".to_string(),
             is_folder: true,
             media_type: None,
+            date_created: Some("2026-08-06T12:30:00Z".to_string()),
             ..Default::default()
         });
         assert_eq!(series.kind, "detail");
         assert_eq!(series.name, "元数据剧名");
+        assert_eq!(series.updated_at, 1_786_019_400);
     }
 
     #[test]

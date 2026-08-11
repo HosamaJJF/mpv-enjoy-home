@@ -30,6 +30,7 @@
 
   type View = 'home' | 'library' | 'settings';
   type Toast = { kind: 'success' | 'error'; message: string };
+  type LibrarySort = 'name-asc' | 'name-desc' | 'time-desc' | 'time-asc';
   type LibrarySource =
     | { kind: 'local'; folder: FolderSummary }
     | { kind: 'remote'; server: MediaServerSummary };
@@ -61,6 +62,16 @@
     { value: 'on', label: '开启' },
     { value: 'off', label: '关闭' },
   ];
+  const librarySortOptions: { value: LibrarySort; label: string }[] = [
+    { value: 'name-asc', label: '名称：升序' },
+    { value: 'name-desc', label: '名称：降序' },
+    { value: 'time-desc', label: '时间：新到旧' },
+    { value: 'time-asc', label: '时间：旧到新' },
+  ];
+  const libraryNameCollator = new Intl.Collator('zh-CN', {
+    numeric: true,
+    sensitivity: 'base',
+  });
   const defaultDanmakuStyle: DanmakuStylePreferences = {
     boldMode: 'inherit',
     fontSize: null,
@@ -99,6 +110,7 @@
   let danmakuOpacityDraft = $state(0.7);
   let danmakuDisplayAreaDraft = $state(0.85);
   let search = $state('');
+  let librarySort = $state<LibrarySort>('name-asc');
   let busy = $state(false);
   let libraryLoading = $state(false);
   let busyMessage = $state('正在整理媒体库…');
@@ -117,6 +129,7 @@
   let appVersion = $state<string | null>(null);
   let serverDraft = $state<MediaServerInput>(emptyServerDraft());
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
+  let localLoadGeneration = 0;
   let remoteLoadGeneration = 0;
 
   const totalMedia = $derived(
@@ -124,8 +137,11 @@
   );
   const sourceCount = $derived(folders.length + servers.length);
   const visibleLocalEntries = $derived(
-    filterEntries(localEntries, search, (entry) =>
-      `${entry.name} ${entry.relativePath}`.toLocaleLowerCase(),
+    sortEntries(
+      filterEntries(localEntries, search, (entry) =>
+        `${entry.name} ${entry.relativePath}`.toLocaleLowerCase(),
+      ),
+      (entry) => entry.modifiedAt,
     ),
   );
   const localDirectories = $derived(
@@ -135,8 +151,11 @@
     visibleLocalEntries.filter((entry) => entry.kind === 'video'),
   );
   const visibleRemoteEntries = $derived(
-    filterEntries(remoteEntries, search, (entry) =>
-      `${entry.name} ${entry.subtitle ?? ''}`.toLocaleLowerCase(),
+    sortEntries(
+      filterEntries(remoteEntries, search, (entry) =>
+        `${entry.name} ${entry.subtitle ?? ''}`.toLocaleLowerCase(),
+      ),
+      (entry) => entry.updatedAt,
     ),
   );
   const selectedSeason = $derived(
@@ -374,7 +393,13 @@
     );
   }
 
-  async function openLocalFolder(folder: FolderSummary, path = '') {
+  async function openLocalFolder(
+    folder: FolderSummary,
+    path = '',
+    refreshIndex = true,
+  ) {
+    const generation = ++localLoadGeneration;
+    remoteLoadGeneration += 1;
     view = 'library';
     selectedSource = { kind: 'local', folder };
     currentPath = path;
@@ -385,16 +410,43 @@
     remoteDetail = null;
     search = '';
     libraryLoading = true;
+    let activeFolder = folder;
+    let indexUpdated = false;
     try {
-      localEntries = await api.listLibraryEntries(folder.id, path);
+      if (refreshIndex) {
+        try {
+          activeFolder = await api.rescanFolder(folder.id);
+          if (generation !== localLoadGeneration) return;
+          indexUpdated = true;
+          selectedSource = { kind: 'local', folder: activeFolder };
+          folders = folders.map((entry) =>
+            entry.id === activeFolder.id ? activeFolder : entry,
+          );
+        } catch (error) {
+          if (generation !== localLoadGeneration) return;
+          notify(
+            'error',
+            `自动扫描失败，正在显示上次索引：${normalizeError(error)}`,
+          );
+        }
+      }
+      const entries = await api.listLibraryEntries(activeFolder.id, path);
+      if (generation !== localLoadGeneration) return;
+      localEntries = entries;
     } catch (error) {
-      notify('error', normalizeError(error));
+      if (generation === localLoadGeneration) {
+        notify('error', normalizeError(error));
+      }
     } finally {
-      libraryLoading = false;
+      if (generation === localLoadGeneration) libraryLoading = false;
+    }
+    if (indexUpdated && generation === localLoadGeneration) {
+      void refreshOverview();
     }
   }
 
   async function openRemoteServer(server: MediaServerSummary) {
+    localLoadGeneration += 1;
     view = 'library';
     selectedSource = { kind: 'remote', server };
     currentPath = '';
@@ -533,11 +585,29 @@
     entries: RemoteLibraryEntry[],
     generation: number,
   ) {
-    const targets = entries.filter((entry) => entry.hasImage).slice(0, 40);
+    const targets = sortEntries(entries, (entry) => entry.updatedAt)
+      .filter((entry) => entry.hasImage)
+      .slice(0, 40);
     await loadRemoteImageSet(
       serverId,
       targets.map((entry) => entry.id),
       generation,
+    );
+  }
+
+  function updateLibrarySort(value: string) {
+    if (!librarySortOptions.some((option) => option.value === value)) return;
+    librarySort = value as LibrarySort;
+    if (selectedSource?.kind !== 'remote' || remoteDetail) return;
+
+    const imageIds = sortEntries(remoteEntries, (entry) => entry.updatedAt)
+      .filter((entry) => entry.hasImage && !remoteImages[entry.id])
+      .map((entry) => entry.id)
+      .slice(0, 40);
+    void loadRemoteImageSet(
+      selectedSource.server.id,
+      imageIds,
+      remoteLoadGeneration,
     );
   }
 
@@ -703,6 +773,9 @@
   }
 
   function openLibrarySources() {
+    localLoadGeneration += 1;
+    remoteLoadGeneration += 1;
+    libraryLoading = false;
     view = 'library';
     selectedSource = null;
     localEntries = [];
@@ -724,6 +797,7 @@
 
     const server = servers.find((entry) => entry.id === item.sourceId);
     if (!server) return;
+    localLoadGeneration += 1;
     view = 'library';
     selectedSource = { kind: 'remote', server };
     currentPath = '';
@@ -738,7 +812,7 @@
 
   function navigateLocal(path: string) {
     if (selectedSource?.kind === 'local') {
-      void openLocalFolder(selectedSource.folder, path);
+      void openLocalFolder(selectedSource.folder, path, false);
     }
   }
 
@@ -1013,6 +1087,30 @@
     return query
       ? entries.filter((entry) => searchable(entry).includes(query))
       : entries;
+  }
+
+  function sortEntries<T extends { name: string }>(
+    entries: T[],
+    updatedAt: (entry: T) => number,
+  ) {
+    return [...entries].sort((left, right) => {
+      if (librarySort.startsWith('name')) {
+        const order = libraryNameCollator.compare(left.name, right.name);
+        return librarySort === 'name-desc' ? -order : order;
+      }
+
+      const leftTime = updatedAt(left);
+      const rightTime = updatedAt(right);
+      if (leftTime <= 0 || rightTime <= 0) {
+        if (leftTime <= 0 && rightTime > 0) return 1;
+        if (rightTime <= 0 && leftTime > 0) return -1;
+      }
+      const timeOrder = leftTime - rightTime;
+      if (timeOrder !== 0) {
+        return librarySort === 'time-desc' ? -timeOrder : timeOrder;
+      }
+      return libraryNameCollator.compare(left.name, right.name);
+    });
   }
 </script>
 
@@ -1344,19 +1442,34 @@
             {/if}
           </div>
           {#if !remoteDetail}
-            <label class="search-box">
-              <Icon name="search" size={18} />
-              <input
-                bind:value={search}
-                type="search"
-                placeholder="搜索当前位置"
-                aria-label="搜索当前位置"
-              />
-              {#if search}<button
-                  onclick={() => (search = '')}
-                  aria-label="清除搜索">×</button
-                >{/if}
-            </label>
+            <div class="library-controls">
+              <label class="sort-control">
+                <span>排序</span>
+                <select
+                  aria-label="媒体库排序方式"
+                  value={librarySort}
+                  onchange={(event) =>
+                    updateLibrarySort(event.currentTarget.value)}
+                >
+                  {#each librarySortOptions as option (option.value)}
+                    <option value={option.value}>{option.label}</option>
+                  {/each}
+                </select>
+              </label>
+              <label class="search-box">
+                <Icon name="search" size={18} />
+                <input
+                  bind:value={search}
+                  type="search"
+                  placeholder="搜索当前位置"
+                  aria-label="搜索当前位置"
+                />
+                {#if search}<button
+                    onclick={() => (search = '')}
+                    aria-label="清除搜索">×</button
+                  >{/if}
+              </label>
+            </div>
           {/if}
         </div>
 

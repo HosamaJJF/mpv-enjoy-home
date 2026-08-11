@@ -155,6 +155,7 @@ pub struct RemoteLibraryEntry {
     pub image_aspect_ratio: Option<f64>,
     pub index_number: Option<i32>,
     pub parent_index_number: Option<i32>,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]

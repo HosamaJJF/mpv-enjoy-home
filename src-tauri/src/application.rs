@@ -573,7 +573,7 @@ fn video_entry(item: MediaItem, relative_path: String) -> LibraryEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{AccentColor, PlayerToggleMode, ThemeMode};
+    use crate::domain::{AccentColor, DiscoveredMedia, PlayerToggleMode, ThemeMode};
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
 
@@ -585,6 +585,115 @@ mod tests {
         );
         assert!(normalize_relative_path("../private").is_err());
         assert!(normalize_relative_path("/private").is_err());
+    }
+
+    #[test]
+    fn local_directory_time_is_the_latest_video_at_every_level() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mpv-enjoy-home-library-entries-{}-{unique}.sqlite3",
+            std::process::id()
+        ));
+        let service = AppService::new(path.clone());
+        service.initialize().unwrap();
+        let folder_id = service
+            .database
+            .add_folder(Path::new("/media"), "media")
+            .unwrap();
+        service
+            .database
+            .replace_media(
+                folder_id,
+                &[
+                    DiscoveredMedia {
+                        name: "old.mkv".to_string(),
+                        path: PathBuf::from("/media/Shows/Season 1/old.mkv"),
+                        relative_path: "Shows/Season 1/old.mkv".to_string(),
+                        extension: "mkv".to_string(),
+                        modified_at: 10,
+                    },
+                    DiscoveredMedia {
+                        name: "new.mkv".to_string(),
+                        path: PathBuf::from("/media/Shows/Season 2/new.mkv"),
+                        relative_path: "Shows/Season 2/new.mkv".to_string(),
+                        extension: "mkv".to_string(),
+                        modified_at: 30,
+                    },
+                    DiscoveredMedia {
+                        name: "movie.mkv".to_string(),
+                        path: PathBuf::from("/media/Movies/movie.mkv"),
+                        relative_path: "Movies/movie.mkv".to_string(),
+                        extension: "mkv".to_string(),
+                        modified_at: 20,
+                    },
+                ],
+            )
+            .unwrap();
+
+        let root = service.list_library_entries(folder_id, None, None).unwrap();
+        assert_eq!(
+            root.iter()
+                .find(|entry| entry.name == "Shows")
+                .map(|entry| entry.modified_at),
+            Some(30)
+        );
+        let shows = service
+            .list_library_entries(folder_id, Some("Shows"), None)
+            .unwrap();
+        assert_eq!(
+            shows
+                .iter()
+                .map(|entry| (entry.name.as_str(), entry.modified_at))
+                .collect::<Vec<_>>(),
+            vec![("Season 1", 10), ("Season 2", 30)]
+        );
+
+        drop(service);
+        for candidate in [
+            path.clone(),
+            PathBuf::from(format!("{}-wal", path.display())),
+            PathBuf::from(format!("{}-shm", path.display())),
+        ] {
+            let _ = std::fs::remove_file(candidate);
+        }
+    }
+
+    #[test]
+    fn rescanning_discovers_media_added_after_the_folder_was_indexed() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "mpv-enjoy-home-auto-rescan-{}-{unique}",
+            std::process::id()
+        ));
+        let media_root = root.join("library");
+        std::fs::create_dir_all(&media_root).unwrap();
+        let service = AppService::new(root.join("state.sqlite3"));
+        service.initialize().unwrap();
+
+        let folder = service.add_folder(&media_root).unwrap();
+        assert_eq!(folder.media_count, 0);
+        std::fs::write(media_root.join("new-episode.mkv"), []).unwrap();
+        assert!(
+            service
+                .list_library_entries(folder.id, None, None)
+                .unwrap()
+                .is_empty()
+        );
+
+        let updated = service.rescan_folder(folder.id).unwrap();
+        let entries = service.list_library_entries(folder.id, None, None).unwrap();
+        assert_eq!(updated.media_count, 1);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "new-episode.mkv");
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
