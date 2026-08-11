@@ -77,6 +77,7 @@ export interface RemoteLibraryEntry {
   imageAspectRatio: number | null;
   indexNumber: number | null;
   parentIndexNumber: number | null;
+  updatedAt: number;
 }
 
 export interface RemoteMediaDetail {
