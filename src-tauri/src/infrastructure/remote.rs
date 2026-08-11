@@ -1386,6 +1386,10 @@ fn is_video_or_container(item: &BaseItem) -> bool {
 
 fn to_library_entry(item: BaseItem) -> RemoteLibraryEntry {
     let updated_at = remote_item_updated_at(&item);
+    let unplayed_count = item
+        .user_data
+        .as_ref()
+        .and_then(|data| data.unplayed_item_count);
     let is_container = matches!(
         item.item_type.as_str(),
         "Folder" | "CollectionFolder" | "BoxSet"
@@ -1415,6 +1419,7 @@ fn to_library_entry(item: BaseItem) -> RemoteLibraryEntry {
         item_type: item.item_type,
         subtitle,
         child_count: item.child_count.or(item.recursive_item_count).unwrap_or(0),
+        unplayed_count,
         has_image: item.image_tags.contains_key("Primary"),
         image_aspect_ratio: item.primary_image_aspect_ratio,
         index_number: item.index_number,
@@ -1772,10 +1777,15 @@ mod tests {
             is_folder: true,
             media_type: None,
             date_created: Some("2026-08-06T12:30:00Z".to_string()),
+            user_data: Some(UserItemData {
+                unplayed_item_count: Some(12),
+                ..Default::default()
+            }),
             ..Default::default()
         });
         assert_eq!(series.kind, "detail");
         assert_eq!(series.name, "元数据剧名");
+        assert_eq!(series.unplayed_count, Some(12));
         assert_eq!(series.updated_at, 1_786_019_400);
     }
 

@@ -73,6 +73,7 @@ export interface RemoteLibraryEntry {
   itemType: string;
   subtitle: string | null;
   childCount: number;
+  unplayedCount: number | null;
   hasImage: boolean;
   imageAspectRatio: number | null;
   indexNumber: number | null;
