@@ -1788,6 +1788,14 @@
                   {#if remoteImages[entry.id]}
                     <img src={remoteImages[entry.id]} alt="" />
                   {/if}
+                  {#if entry.itemType === 'Series' && (entry.unplayedCount ?? 0) > 0}
+                    <span
+                      class="remote-unplayed-badge"
+                      aria-label={`${entry.unplayedCount} 集未看`}
+                      title={`${entry.unplayedCount} 集未看`}
+                      >{entry.unplayedCount}</span
+                    >
+                  {/if}
                   <span class="remote-copy">
                     <span class="source-kind">{remoteTypeLabel(entry)}</span>
                     <strong>{entry.name}</strong>

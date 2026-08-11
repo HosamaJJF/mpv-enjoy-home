@@ -151,6 +151,7 @@ pub struct RemoteLibraryEntry {
     pub item_type: String,
     pub subtitle: Option<String>,
     pub child_count: usize,
+    pub unplayed_count: Option<usize>,
     pub has_image: bool,
     pub image_aspect_ratio: Option<f64>,
     pub index_number: Option<i32>,

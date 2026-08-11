@@ -1461,6 +1461,30 @@ button.secondary:hover {
   background: linear-gradient(transparent, rgba(17, 13, 25, 0.9));
   content: '';
 }
+.remote-unplayed-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 3;
+  display: grid;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  place-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.82);
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(
+    135deg,
+    var(--accent-gradient-start),
+    var(--accent-gradient-end)
+  );
+  box-shadow: 0 3px 10px rgba(17, 13, 25, 0.3);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
+}
 .remote-copy {
   position: relative;
   z-index: 1;
