@@ -326,6 +326,40 @@ impl AppService {
         {
             return Err(AppError::message("播放器启动音量必须在 0 到 100 之间"));
         }
+        let style = preferences.danmaku_style;
+        if style
+            .font_size
+            .is_some_and(|value| !(10..=100).contains(&value))
+        {
+            return Err(AppError::message("弹幕字号必须在 10 到 100 之间"));
+        }
+        if style
+            .outline
+            .is_some_and(|value| !(0.0..=4.0).contains(&value))
+        {
+            return Err(AppError::message("弹幕描边必须在 0 到 4 之间"));
+        }
+        if style.shadow.is_some_and(|value| value > 10) {
+            return Err(AppError::message("弹幕阴影必须在 0 到 10 之间"));
+        }
+        if style
+            .scroll_time
+            .is_some_and(|value| !(1..=60).contains(&value))
+        {
+            return Err(AppError::message("弹幕滚动时长必须在 1 到 60 秒之间"));
+        }
+        if style
+            .opacity
+            .is_some_and(|value| !(0.0..=1.0).contains(&value))
+        {
+            return Err(AppError::message("弹幕不透明度必须在 0 到 1 之间"));
+        }
+        if style
+            .display_area
+            .is_some_and(|value| !(0.0..=1.0).contains(&value))
+        {
+            return Err(AppError::message("弹幕显示区域必须在 0 到 1 之间"));
+        }
         let value = serde_json::to_string(preferences)
             .map_err(|error| AppError::message(format!("播放器偏好无法保存：{error}")))?;
         self.database
@@ -611,6 +645,15 @@ mod tests {
             startup_volume: Some(72),
             fullscreen_mode: PlayerToggleMode::On,
             danmaku_mode: PlayerToggleMode::Off,
+            danmaku_style: crate::domain::DanmakuStylePreferences {
+                bold_mode: PlayerToggleMode::On,
+                font_size: Some(42),
+                outline: Some(1.5),
+                shadow: Some(2),
+                scroll_time: Some(12),
+                opacity: Some(0.75),
+                display_area: Some(0.8),
+            },
         };
         assert_eq!(service.set_player_preferences(&selected).unwrap(), selected);
         assert_eq!(service.player_preferences().unwrap(), selected);
@@ -620,6 +663,14 @@ mod tests {
             ..PlayerPreferences::default()
         };
         assert!(service.set_player_preferences(&invalid).is_err());
+        let invalid_style = PlayerPreferences {
+            danmaku_style: crate::domain::DanmakuStylePreferences {
+                outline: Some(4.1),
+                ..Default::default()
+            },
+            ..PlayerPreferences::default()
+        };
+        assert!(service.set_player_preferences(&invalid_style).is_err());
         drop(service);
 
         for candidate in [

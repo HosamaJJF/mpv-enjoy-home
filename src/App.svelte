@@ -8,9 +8,11 @@
     isRemoteAuthenticationRequired,
   } from './api';
   import Icon from './components/Icon.svelte';
+  import PreferenceRange from './components/PreferenceRange.svelte';
   import type {
     AccentColor,
     AppearanceSettings,
+    DanmakuStylePreferences,
     FolderSummary,
     LibraryEntry,
     MediaServerInput,
@@ -54,6 +56,20 @@
     { value: 'on', label: '开启' },
     { value: 'off', label: '关闭' },
   ];
+  const danmakuToggleOptions: { value: PlayerToggleMode; label: string }[] = [
+    { value: 'inherit', label: '跟随插件' },
+    { value: 'on', label: '开启' },
+    { value: 'off', label: '关闭' },
+  ];
+  const defaultDanmakuStyle: DanmakuStylePreferences = {
+    boldMode: 'inherit',
+    fontSize: null,
+    outline: null,
+    shadow: null,
+    scrollTime: null,
+    opacity: null,
+    displayArea: null,
+  };
 
   let view = $state<View>('home');
   let folders = $state<FolderSummary[]>([]);
@@ -73,8 +89,15 @@
     startupVolume: null,
     fullscreenMode: 'inherit',
     danmakuMode: 'inherit',
+    danmakuStyle: defaultDanmakuStyle,
   });
   let volumeDraft = $state(70);
+  let danmakuFontSizeDraft = $state(50);
+  let danmakuOutlineDraft = $state(1);
+  let danmakuShadowDraft = $state(0);
+  let danmakuScrollTimeDraft = $state(15);
+  let danmakuOpacityDraft = $state(0.7);
+  let danmakuDisplayAreaDraft = $state(0.85);
   let search = $state('');
   let busy = $state(false);
   let libraryLoading = $state(false);
@@ -172,6 +195,7 @@
     try {
       playerPreferences = await api.getPlayerPreferences();
       volumeDraft = playerPreferences.startupVolume ?? 70;
+      syncDanmakuStyleDrafts(playerPreferences.danmakuStyle, true);
     } catch (error) {
       notify('error', normalizeError(error));
     }
@@ -201,13 +225,43 @@
     try {
       playerPreferences = await api.setPlayerPreferences(next);
       volumeDraft = playerPreferences.startupVolume ?? volumeDraft;
+      syncDanmakuStyleDrafts(playerPreferences.danmakuStyle);
     } catch (error) {
       playerPreferences = previous;
       volumeDraft = previous.startupVolume ?? volumeDraft;
+      syncDanmakuStyleDrafts(previous.danmakuStyle);
       notify('error', normalizeError(error));
     } finally {
       playerPreferencesSaving = false;
     }
+  }
+
+  function updateDanmakuStyle(patch: Partial<DanmakuStylePreferences>) {
+    return updatePlayerPreferences({
+      ...playerPreferences,
+      danmakuStyle: {
+        ...playerPreferences.danmakuStyle,
+        ...patch,
+      },
+    });
+  }
+
+  function syncDanmakuStyleDrafts(
+    style: DanmakuStylePreferences,
+    resetMissing = false,
+  ) {
+    danmakuFontSizeDraft =
+      style.fontSize ?? (resetMissing ? 50 : danmakuFontSizeDraft);
+    danmakuOutlineDraft =
+      style.outline ?? (resetMissing ? 1 : danmakuOutlineDraft);
+    danmakuShadowDraft =
+      style.shadow ?? (resetMissing ? 0 : danmakuShadowDraft);
+    danmakuScrollTimeDraft =
+      style.scrollTime ?? (resetMissing ? 15 : danmakuScrollTimeDraft);
+    danmakuOpacityDraft =
+      style.opacity ?? (resetMissing ? 0.7 : danmakuOpacityDraft);
+    danmakuDisplayAreaDraft =
+      style.displayArea ?? (resetMissing ? 0.85 : danmakuDisplayAreaDraft);
   }
 
   async function refreshOverview() {
@@ -1739,7 +1793,6 @@
             <div class="preference-row">
               <span class="preference-copy">
                 <strong>启动音量</strong>
-                <small>仅覆盖从 Home 启动的播放器</small>
               </span>
               <div class="volume-preference">
                 <label class="override-toggle">
@@ -1784,7 +1837,6 @@
             <label class="preference-row">
               <span class="preference-copy">
                 <strong>全屏启动</strong>
-                <small>可明确开启、关闭或保留 mpv 配置</small>
               </span>
               <select
                 class="preference-select"
@@ -1822,6 +1874,158 @@
                 {/each}
               </select>
             </label>
+            <details class="danmaku-style-preferences">
+              <summary>
+                <span class="preference-copy">
+                  <strong>弹幕样式</strong>
+                </span>
+                <span class="details-hint">详情</span>
+              </summary>
+              <div class="danmaku-style-rows">
+                <div class="danmaku-style-row">
+                  <span class="preference-copy">
+                    <strong>粗体</strong>
+                    <small>控制弹幕文字是否加粗</small>
+                  </span>
+                  <select
+                    class="preference-select"
+                    value={playerPreferences.danmakuStyle.boldMode}
+                    aria-label="弹幕粗体"
+                    disabled={playerPreferencesSaving}
+                    onchange={(event) =>
+                      void updateDanmakuStyle({
+                        boldMode: event.currentTarget.value as PlayerToggleMode,
+                      })}
+                  >
+                    {#each danmakuToggleOptions as option (option.value)}
+                      <option value={option.value}>{option.label}</option>
+                    {/each}
+                  </select>
+                </div>
+                <PreferenceRange
+                  label="字号"
+                  description="控制弹幕字体大小"
+                  overridden={playerPreferences.danmakuStyle.fontSize !== null}
+                  draft={danmakuFontSizeDraft}
+                  min={10}
+                  max={100}
+                  step={1}
+                  output={String(danmakuFontSizeDraft)}
+                  disabled={playerPreferencesSaving}
+                  onToggle={(enabled) =>
+                    void updateDanmakuStyle({
+                      fontSize: enabled ? danmakuFontSizeDraft : null,
+                    })}
+                  onDraft={(value) => (danmakuFontSizeDraft = value)}
+                  onCommit={() =>
+                    void updateDanmakuStyle({
+                      fontSize: danmakuFontSizeDraft,
+                    })}
+                />
+                <PreferenceRange
+                  label="描边"
+                  description="描边粗细，范围 0–4"
+                  overridden={playerPreferences.danmakuStyle.outline !== null}
+                  draft={danmakuOutlineDraft}
+                  min={0}
+                  max={4}
+                  step={0.1}
+                  output={danmakuOutlineDraft.toFixed(1)}
+                  disabled={playerPreferencesSaving}
+                  onToggle={(enabled) =>
+                    void updateDanmakuStyle({
+                      outline: enabled ? danmakuOutlineDraft : null,
+                    })}
+                  onDraft={(value) => (danmakuOutlineDraft = value)}
+                  onCommit={() =>
+                    void updateDanmakuStyle({
+                      outline: danmakuOutlineDraft,
+                    })}
+                />
+                <PreferenceRange
+                  label="阴影"
+                  description="阴影深度，范围 0–10"
+                  overridden={playerPreferences.danmakuStyle.shadow !== null}
+                  draft={danmakuShadowDraft}
+                  min={0}
+                  max={10}
+                  step={1}
+                  output={String(danmakuShadowDraft)}
+                  disabled={playerPreferencesSaving}
+                  onToggle={(enabled) =>
+                    void updateDanmakuStyle({
+                      shadow: enabled ? danmakuShadowDraft : null,
+                    })}
+                  onDraft={(value) => (danmakuShadowDraft = value)}
+                  onCommit={() =>
+                    void updateDanmakuStyle({
+                      shadow: danmakuShadowDraft,
+                    })}
+                />
+                <PreferenceRange
+                  label="滚动时长"
+                  description="数值越大，滚动弹幕移动越慢"
+                  overridden={playerPreferences.danmakuStyle.scrollTime !==
+                    null}
+                  draft={danmakuScrollTimeDraft}
+                  min={1}
+                  max={60}
+                  step={1}
+                  output={`${danmakuScrollTimeDraft} 秒`}
+                  disabled={playerPreferencesSaving}
+                  onToggle={(enabled) =>
+                    void updateDanmakuStyle({
+                      scrollTime: enabled ? danmakuScrollTimeDraft : null,
+                    })}
+                  onDraft={(value) => (danmakuScrollTimeDraft = value)}
+                  onCommit={() =>
+                    void updateDanmakuStyle({
+                      scrollTime: danmakuScrollTimeDraft,
+                    })}
+                />
+                <PreferenceRange
+                  label="不透明度"
+                  description="0% 完全透明，100% 完全不透明"
+                  overridden={playerPreferences.danmakuStyle.opacity !== null}
+                  draft={danmakuOpacityDraft}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  output={`${Math.round(danmakuOpacityDraft * 100)}%`}
+                  disabled={playerPreferencesSaving}
+                  onToggle={(enabled) =>
+                    void updateDanmakuStyle({
+                      opacity: enabled ? danmakuOpacityDraft : null,
+                    })}
+                  onDraft={(value) => (danmakuOpacityDraft = value)}
+                  onCommit={() =>
+                    void updateDanmakuStyle({
+                      opacity: danmakuOpacityDraft,
+                    })}
+                />
+                <PreferenceRange
+                  label="显示区域"
+                  description="限制弹幕占用的画面高度"
+                  overridden={playerPreferences.danmakuStyle.displayArea !==
+                    null}
+                  draft={danmakuDisplayAreaDraft}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  output={`${Math.round(danmakuDisplayAreaDraft * 100)}%`}
+                  disabled={playerPreferencesSaving}
+                  onToggle={(enabled) =>
+                    void updateDanmakuStyle({
+                      displayArea: enabled ? danmakuDisplayAreaDraft : null,
+                    })}
+                  onDraft={(value) => (danmakuDisplayAreaDraft = value)}
+                  onCommit={() =>
+                    void updateDanmakuStyle({
+                      displayArea: danmakuDisplayAreaDraft,
+                    })}
+                />
+              </div>
+            </details>
           </div>
           <div class="settings-actions">
             <button class="primary" onclick={choosePlayer}>选择播放器</button

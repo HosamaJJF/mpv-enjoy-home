@@ -192,7 +192,41 @@ fn preference_arguments(preferences: &PlayerPreferences) -> Vec<OsString> {
         PlayerToggleMode::On => arguments.push(OsString::from("--fullscreen=yes")),
         PlayerToggleMode::Off => arguments.push(OsString::from("--fullscreen=no")),
     }
+    let style = preferences.danmaku_style;
+    match style.bold_mode {
+        PlayerToggleMode::Inherit => {}
+        PlayerToggleMode::On => push_danmaku_style_argument(&mut arguments, "bold", "yes"),
+        PlayerToggleMode::Off => push_danmaku_style_argument(&mut arguments, "bold", "no"),
+    }
+    if let Some(value) = style.font_size {
+        push_danmaku_style_argument(&mut arguments, "fontsize", value);
+    }
+    if let Some(value) = style.outline {
+        push_danmaku_style_argument(&mut arguments, "outline", value);
+    }
+    if let Some(value) = style.shadow {
+        push_danmaku_style_argument(&mut arguments, "shadow", value);
+    }
+    if let Some(value) = style.scroll_time {
+        push_danmaku_style_argument(&mut arguments, "scrolltime", value);
+    }
+    if let Some(value) = style.opacity {
+        push_danmaku_style_argument(&mut arguments, "opacity", value);
+    }
+    if let Some(value) = style.display_area {
+        push_danmaku_style_argument(&mut arguments, "displayarea", value);
+    }
     arguments
+}
+
+fn push_danmaku_style_argument(
+    arguments: &mut Vec<OsString>,
+    option: &str,
+    value: impl std::fmt::Display,
+) {
+    arguments.push(OsString::from(format!(
+        "--script-opts-append=uosc_danmaku-{option}={value}"
+    )));
 }
 
 fn push_ipc_argument(arguments: &mut Vec<OsString>, ipc_address: Option<&OsStr>) {
@@ -440,12 +474,28 @@ mod tests {
             startup_volume: Some(72),
             fullscreen_mode: PlayerToggleMode::On,
             danmaku_mode: PlayerToggleMode::Off,
+            danmaku_style: crate::domain::DanmakuStylePreferences {
+                bold_mode: PlayerToggleMode::On,
+                font_size: Some(42),
+                outline: Some(1.5),
+                shadow: Some(2),
+                scroll_time: Some(12),
+                opacity: Some(0.75),
+                display_area: Some(0.8),
+            },
         };
         assert_eq!(
             preference_arguments(&preferences),
             [
                 OsString::from("--volume=72"),
                 OsString::from("--fullscreen=yes"),
+                OsString::from("--script-opts-append=uosc_danmaku-bold=yes"),
+                OsString::from("--script-opts-append=uosc_danmaku-fontsize=42"),
+                OsString::from("--script-opts-append=uosc_danmaku-outline=1.5"),
+                OsString::from("--script-opts-append=uosc_danmaku-shadow=2"),
+                OsString::from("--script-opts-append=uosc_danmaku-scrolltime=12"),
+                OsString::from("--script-opts-append=uosc_danmaku-opacity=0.75"),
+                OsString::from("--script-opts-append=uosc_danmaku-displayarea=0.8"),
             ]
         );
         assert!(preference_arguments(&PlayerPreferences::default()).is_empty());
