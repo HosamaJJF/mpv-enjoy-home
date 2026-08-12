@@ -6,9 +6,9 @@ REF="${2:?usage: upload-release-assets.sh <target> <ref>}"
 REPO="${3:?usage: upload-release-assets.sh <target> <ref> <repo>}"
 
 VERSION="${REF#v}"
-BUNDLE_DIR="src-tauri/target/${TARGET}/release/bundle"
-APP_NAME="mpv-enjoy Home"
-PREFIX="mpv-enjoy-home_${VERSION}"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUNDLE_DIR="${PROJECT_DIR}/src-tauri/target/${TARGET}/release/bundle"
+PREFIX="mpv-enjoy-home-${VERSION}"
 
 cd "${BUNDLE_DIR}"
 
@@ -21,36 +21,53 @@ upload() {
   gh release upload "${REF}" "$1" --repo "${REPO}" --clobber
 }
 
+move_single_bundle() {
+  local destination="$1"
+  local description="$2"
+  shift 2
+
+  if [[ "$#" -ne 1 ]]; then
+    echo "expected exactly one ${description}, found $#" >&2
+    exit 1
+  fi
+
+  mv "$1" "${destination}"
+}
+
+shopt -s nullglob
+
 case "${TARGET}" in
   x86_64-pc-windows-msvc)
-    for f in nsis/*.exe; do
-      [ -f "${f}" ] || continue
-      mv "${f}" "${PREFIX}_windows-x64-setup.exe"
-    done
-    for f in msi/*.msi; do
-      [ -f "${f}" ] || continue
-      mv "${f}" "${PREFIX}_windows-x64.msi"
-    done
-    upload "${PREFIX}_windows-x64-setup.exe"
-    upload "${PREFIX}_windows-x64.msi"
+    WINDOWS_PREFIX="${PREFIX}-windows-x64"
+    PORTABLE_DIR="${WINDOWS_PREFIX}"
+
+    move_single_bundle "${WINDOWS_PREFIX}-setup.exe" "NSIS executable" nsis/*.exe
+    move_single_bundle "${WINDOWS_PREFIX}.msi" "MSI package" msi/*.msi
+
+    if [[ ! -f ../mpv-enjoy-home.exe ]]; then
+      echo "release executable not found: ${BUNDLE_DIR}/../mpv-enjoy-home.exe" >&2
+      exit 1
+    fi
+
+    mkdir "${PORTABLE_DIR}"
+    cp ../mpv-enjoy-home.exe "${PORTABLE_DIR}/mpv-enjoy-home.exe"
+    cp "${PROJECT_DIR}/LICENSE" "${PORTABLE_DIR}/LICENSE"
+    PORTABLE_SOURCE="${PORTABLE_DIR}" \
+      PORTABLE_DESTINATION="${WINDOWS_PREFIX}.zip" \
+      powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
+      'Compress-Archive -LiteralPath $env:PORTABLE_SOURCE -DestinationPath $env:PORTABLE_DESTINATION -CompressionLevel Optimal -Force'
+
+    upload "${WINDOWS_PREFIX}-setup.exe"
+    upload "${WINDOWS_PREFIX}.msi"
+    upload "${WINDOWS_PREFIX}.zip"
     ;;
   aarch64-apple-darwin)
-    for f in dmg/*.dmg; do
-      [ -f "${f}" ] || continue
-      mv "${f}" "${PREFIX}_macos-aarch64.dmg"
-    done
-    tar -czf "${PREFIX}_macos-aarch64.app.tar.gz" -C macos "${APP_NAME}.app"
-    upload "${PREFIX}_macos-aarch64.dmg"
-    upload "${PREFIX}_macos-aarch64.app.tar.gz"
+    move_single_bundle "${PREFIX}-macos-arm64.dmg" "Apple Silicon DMG" dmg/*.dmg
+    upload "${PREFIX}-macos-arm64.dmg"
     ;;
   x86_64-apple-darwin)
-    for f in dmg/*.dmg; do
-      [ -f "${f}" ] || continue
-      mv "${f}" "${PREFIX}_macos-x86_64.dmg"
-    done
-    tar -czf "${PREFIX}_macos-x86_64.app.tar.gz" -C macos "${APP_NAME}.app"
-    upload "${PREFIX}_macos-x86_64.dmg"
-    upload "${PREFIX}_macos-x86_64.app.tar.gz"
+    move_single_bundle "${PREFIX}-macos-x64.dmg" "Intel DMG" dmg/*.dmg
+    upload "${PREFIX}-macos-x64.dmg"
     ;;
   *)
     echo "unsupported target: ${TARGET}" >&2
