@@ -6,6 +6,10 @@ on:
       - main
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -35,6 +39,46 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+  rust-quality:
+    name: Rust quality (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-2025
+          - label: macOS Apple Silicon
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          components: rustfmt, clippy
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2; LGPL-3.0 CI cache tooling
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      - name: Lint Rust
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Test Rust
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Test release asset packaging
+        if: runner.os == 'Windows'
+        shell: bash
+        run: bash scripts/test-upload-release-assets.sh
+
   native:
     name: Native (${{ matrix.label }})
     strategy:
@@ -62,19 +106,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.92.0
-          components: rustfmt, clippy
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2; LGPL-3.0 CI cache tooling
+        with:
+          workspaces: './src-tauri -> target'
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
-
-      - name: Lint Rust
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-
-      - name: Test Rust
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
       - name: Build desktop application
         run: npm run tauri build -- --no-bundle
