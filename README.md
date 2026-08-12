@@ -42,6 +42,13 @@ mpv-enjoy 一致的 `windows-x64`、`macos-arm64` 和 `macos-x64`：
 Windows ZIP 是无需安装的独立程序包，不包含 mpv；应用数据仍写入系统应用数据目录，不会
 改为写在程序旁。macOS 只发布 DMG，不另行发布 `.app` 压缩包。
 
+修改发布附件脚本后可运行以下 fixture 测试，验证三个 target 的公开文件名、Windows ZIP 和
+macOS 附件范围：
+
+```sh
+bash scripts/test-upload-release-assets.sh
+```
+
 ## 播放器发现顺序
 
 首页按以下顺序寻找播放器：
