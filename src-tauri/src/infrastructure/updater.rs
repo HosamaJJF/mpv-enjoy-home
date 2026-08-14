@@ -650,7 +650,10 @@ mod tests {
 
         let win_zip = manager.match_release_asset(&release.assets, AppInstallType::WindowsPortable);
         assert!(win_zip.is_some());
-        assert_eq!(win_zip.unwrap().name, "mpv-enjoy-home-9.9.9-windows-x64.zip");
+        assert_eq!(
+            win_zip.unwrap().name,
+            "mpv-enjoy-home-9.9.9-windows-x64.zip"
+        );
     }
 
     #[test]
