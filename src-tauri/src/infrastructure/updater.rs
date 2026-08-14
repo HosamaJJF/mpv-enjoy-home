@@ -254,6 +254,28 @@ impl UpdateManager {
                     assets
                         .iter()
                         .find(|asset| asset.name.to_lowercase().ends_with(".zip"))
+                })
+                .or_else(|| {
+                    assets.iter().find(|asset| {
+                        let name = asset.name.to_lowercase();
+                        name.starts_with(&prefix)
+                            && name.contains("windows-x64")
+                            && (name.ends_with("-setup.exe") || name.ends_with(".msi"))
+                    })
+                })
+                .or_else(|| {
+                    assets.iter().find(|asset| {
+                        let name = asset.name.to_lowercase();
+                        name.contains("windows-x64")
+                            && (name.ends_with("-setup.exe") || name.ends_with(".msi"))
+                    })
+                })
+                .or_else(|| {
+                    assets.iter().find(|asset| {
+                        let name = asset.name.to_lowercase();
+                        name.ends_with("-setup.exe")
+                            || (name.ends_with(".exe") && !name.ends_with(".zip"))
+                    })
                 }),
         };
 
@@ -302,41 +324,44 @@ impl UpdateManager {
         io::copy(&mut response, &mut dest_file)
             .map_err(|err| AppError(format!("保存更新文件失败：{err}")))?;
 
-        let install_type = Self::current_install_type();
+        let is_dmg = target_file_path
+            .extension()
+            .map(|ext| ext.eq_ignore_ascii_case("dmg"))
+            .unwrap_or(false);
+        let is_zip = target_file_path
+            .extension()
+            .map(|ext| ext.eq_ignore_ascii_case("zip"))
+            .unwrap_or(false);
 
-        match install_type {
-            AppInstallType::MacApp => {
-                let status = Command::new("open")
-                    .arg(&target_file_path)
-                    .status()
-                    .map_err(|err| AppError(format!("打开 DMG 更新镜像失败：{err}")))?;
+        if is_dmg {
+            let status = Command::new("open")
+                .arg(&target_file_path)
+                .status()
+                .map_err(|err| AppError(format!("打开 DMG 更新镜像失败：{err}")))?;
 
-                if !status.success() {
-                    return Err(AppError("打开更新镜像未成功完成".to_string()));
-                }
-
-                Ok(UpdateApplyResult {
-                    action: "opened_dmg".to_string(),
-                    message:
-                        "已下载并打开更新镜像，请将新版本拖入“应用程序”完成覆盖，然后重新打开应用。"
-                            .to_string(),
-                    requires_restart: false,
-                })
+            if !status.success() {
+                return Err(AppError("打开更新镜像未成功完成".to_string()));
             }
-            AppInstallType::WindowsSetup => {
-                Command::new(&target_file_path)
-                    .spawn()
-                    .map_err(|err| AppError(format!("启动更新安装程序失败：{err}")))?;
 
-                Ok(UpdateApplyResult {
-                    action: "started_installer".to_string(),
-                    message: "已启动安装程序，请按提示完成安装。".to_string(),
-                    requires_restart: true,
-                })
-            }
-            AppInstallType::WindowsPortable => {
-                self.apply_windows_portable_update(&target_file_path)
-            }
+            Ok(UpdateApplyResult {
+                action: "opened_dmg".to_string(),
+                message:
+                    "已下载并打开更新镜像，请将新版本拖入“应用程序”完成覆盖，然后重新打开应用。"
+                        .to_string(),
+                requires_restart: false,
+            })
+        } else if is_zip {
+            self.apply_windows_portable_update(&target_file_path)
+        } else {
+            Command::new(&target_file_path)
+                .spawn()
+                .map_err(|err| AppError(format!("启动更新安装程序失败：{err}")))?;
+
+            Ok(UpdateApplyResult {
+                action: "started_installer".to_string(),
+                message: "已启动安装程序，请按提示完成安装。".to_string(),
+                requires_restart: true,
+            })
         }
     }
 
@@ -700,6 +725,38 @@ mod tests {
         assert_eq!(
             win_portable_asset.unwrap().name,
             "mpv-enjoy-1.2.2-windows-x64.zip"
+        );
+    }
+
+    #[test]
+    fn matches_windows_portable_fallback_to_setup_exe() {
+        let manager = UpdateManager::with_config(UpdateSourceConfig {
+            repo_owner: "HosamaJJF".to_string(),
+            repo_name: "mpv-enjoy-home".to_string(),
+            asset_prefix: "mpv-enjoy-home".to_string(),
+            distribution_name: "mpv-enjoy Home".to_string(),
+            current_version: "1.0.2".to_string(),
+            api_endpoint: None,
+        });
+
+        let assets = vec![
+            GitHubAsset {
+                name: "mpv-enjoy-home_1.0.2_windows-x64-setup.exe".to_string(),
+                browser_download_url: "https://example.com/setup.exe".to_string(),
+                size: 5000000,
+            },
+            GitHubAsset {
+                name: "mpv-enjoy-home_1.0.2_windows-x64.msi".to_string(),
+                browser_download_url: "https://example.com/win.msi".to_string(),
+                size: 5000000,
+            },
+        ];
+
+        let matched = manager.match_release_asset(&assets, AppInstallType::WindowsPortable);
+        assert!(matched.is_some());
+        assert_eq!(
+            matched.unwrap().name,
+            "mpv-enjoy-home_1.0.2_windows-x64-setup.exe"
         );
     }
 }

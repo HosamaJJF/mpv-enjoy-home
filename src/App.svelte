@@ -2302,6 +2302,13 @@
                     >({formatBytes(updateCheckResult.matchedAsset.size)})</span
                   >
                 </div>
+              {:else}
+                <div class="matched-asset-info">
+                  <span class="asset-name"
+                    >未找到与当前安装类型匹配的自动更新包，可前往 Release
+                    页面手动下载。</span
+                  >
+                </div>
               {/if}
             </div>
           {/if}
@@ -2310,12 +2317,16 @@
             {#if updateCheckResult?.hasUpdate && updateCheckResult.matchedAsset}
               <button class="primary" disabled={updating} onclick={applyUpdate}>
                 <Icon name="download" />
-                {#if updateCheckResult.installType === 'mac-app'}
+                {#if updateCheckResult.matchedAsset.name
+                  .toLowerCase()
+                  .endsWith('.dmg')}
                   {updating ? '正在下载...' : '下载并打开 DMG'}
-                {:else if updateCheckResult.installType === 'windows-setup'}
-                  {updating ? '正在下载...' : '下载并运行安装'}
-                {:else}
+                {:else if updateCheckResult.matchedAsset.name
+                  .toLowerCase()
+                  .endsWith('.zip')}
                   {updating ? '正在更新...' : '立即覆盖更新并重启'}
+                {:else}
+                  {updating ? '正在下载...' : '下载并运行安装'}
                 {/if}
               </button>
             {/if}
@@ -2331,7 +2342,10 @@
 
             {#if updateCheckResult?.releaseUrl}
               <button
-                class="secondary"
+                class={updateCheckResult.hasUpdate &&
+                !updateCheckResult.matchedAsset
+                  ? 'primary'
+                  : 'secondary'}
                 type="button"
                 onclick={() => openExternal(updateCheckResult!.releaseUrl)}
               >
