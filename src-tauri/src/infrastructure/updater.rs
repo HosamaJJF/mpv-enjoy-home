@@ -535,6 +535,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "需要绑定本机回环端口"]
     fn checks_updates_against_mock_endpoint() {
         use std::io::Write;
         use std::net::TcpListener;
@@ -600,6 +601,56 @@ mod tests {
         assert!(result.matched_asset.is_some());
 
         mock_server.join().unwrap();
+    }
+
+    #[test]
+    fn parses_and_matches_mock_release_json() {
+        let body = r##"{
+            "tag_name": "v9.9.9",
+            "name": "v9.9.9 带来更强大的功能",
+            "body": "新功能说明：支持多平台更新",
+            "html_url": "https://github.com/HosamaJJF/mpv-enjoy-home/releases/tag/v9.9.9",
+            "published_at": "2026-08-14T12:00:00Z",
+            "assets": [
+                {
+                    "name": "mpv-enjoy-home-9.9.9-macos-arm64.dmg",
+                    "browser_download_url": "https://github.com/example/arm64.dmg",
+                    "size": 42000000
+                },
+                {
+                    "name": "mpv-enjoy-home-9.9.9-macos-x64.dmg",
+                    "browser_download_url": "https://github.com/example/x64.dmg",
+                    "size": 42000000
+                },
+                {
+                    "name": "mpv-enjoy-home-9.9.9-windows-x64-setup.exe",
+                    "browser_download_url": "https://github.com/example/setup.exe",
+                    "size": 45000000
+                },
+                {
+                    "name": "mpv-enjoy-home-9.9.9-windows-x64.zip",
+                    "browser_download_url": "https://github.com/example/portable.zip",
+                    "size": 35000000
+                }
+            ]
+        }"##;
+
+        let release: GitHubRelease = serde_json::from_str(body).unwrap();
+        let latest_version = release.tag_name.trim_start_matches(['v', 'V']).to_string();
+        assert!(is_newer_version(&latest_version, "1.0.2"));
+
+        let manager = UpdateManager::with_config(UpdateSourceConfig {
+            repo_owner: "HosamaJJF".to_string(),
+            repo_name: "mpv-enjoy-home".to_string(),
+            asset_prefix: "mpv-enjoy-home".to_string(),
+            distribution_name: "mpv-enjoy Home".to_string(),
+            current_version: "1.0.2".to_string(),
+            api_endpoint: None,
+        });
+
+        let win_zip = manager.match_release_asset(&release.assets, AppInstallType::WindowsPortable);
+        assert!(win_zip.is_some());
+        assert_eq!(win_zip.unwrap().name, "mpv-enjoy-home-9.9.9-windows-x64.zip");
     }
 
     #[test]
