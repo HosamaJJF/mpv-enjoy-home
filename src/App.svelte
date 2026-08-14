@@ -11,6 +11,7 @@
   import PreferenceRange from './components/PreferenceRange.svelte';
   import type {
     AccentColor,
+    AppInstallType,
     AppearanceSettings,
     DanmakuStylePreferences,
     FolderSummary,
@@ -26,6 +27,7 @@
     RemoteMediaDetail,
     RemoteSeasonDetail,
     ThemeMode,
+    UpdateCheckResult,
   } from './types';
 
   type View = 'home' | 'library' | 'settings';
@@ -127,6 +129,9 @@
   let appearanceSaving = $state(false);
   let playerPreferencesSaving = $state(false);
   let appVersion = $state<string | null>(null);
+  let updateCheckResult = $state<UpdateCheckResult | null>(null);
+  let checkingUpdate = $state(false);
+  let updating = $state(false);
   let serverDraft = $state<MediaServerInput>(emptyServerDraft());
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let localLoadGeneration = 0;
@@ -202,6 +207,69 @@
       appVersion = await getVersion();
     } catch {
       appVersion = null;
+    }
+    void checkUpdate(true);
+  }
+
+  async function checkUpdate(silent = false) {
+    if (checkingUpdate || updating) return;
+    checkingUpdate = true;
+    try {
+      const result = await api.checkAppUpdate();
+      updateCheckResult = result;
+      if (!silent) {
+        if (result.hasUpdate) {
+          notify('success', `发现新版本 v${result.latestVersion}`);
+        } else {
+          notify('success', `当前已是最新版本 (v${result.currentVersion})`);
+        }
+      }
+    } catch (error) {
+      if (!silent) {
+        notify('error', `检查更新失败：${normalizeError(error)}`);
+      }
+    } finally {
+      checkingUpdate = false;
+    }
+  }
+
+  async function applyUpdate() {
+    if (!updateCheckResult?.matchedAsset || updating) return;
+    const asset = updateCheckResult.matchedAsset;
+    updating = true;
+    try {
+      const result = await api.downloadAndApplyUpdate(
+        asset.downloadUrl,
+        asset.name,
+      );
+      notify('success', result.message);
+    } catch (error) {
+      notify('error', `更新失败：${normalizeError(error)}`);
+    } finally {
+      updating = false;
+    }
+  }
+
+  function openExternal(url: string) {
+    void api.openExternalUrl(url);
+  }
+
+  function formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+  }
+
+  function installTypeLabel(type: AppInstallType): string {
+    switch (type) {
+      case 'mac-app':
+        return 'macOS';
+      case 'windows-setup':
+        return 'Windows 安装版';
+      case 'windows-portable':
+        return 'Windows 免安装版';
     }
   }
 
@@ -1160,10 +1228,22 @@
       <Icon name="back" size={18} />
       <span>{sidebarCollapsed ? '展开侧栏' : '收起侧栏'}</span>
     </button>
-    <span class="version">
-      mpv-enjoy Home{#if appVersion}
-        · {appVersion}{/if}
-    </span>
+    <button
+      class="version-button"
+      type="button"
+      title={updateCheckResult?.hasUpdate
+        ? `发现新版本 v${updateCheckResult.latestVersion}，点击前往设置更新`
+        : '查看软件设置'}
+      onclick={() => (view = 'settings')}
+    >
+      <span>
+        mpv-enjoy Home{#if appVersion}
+          · {appVersion}{/if}
+      </span>
+      {#if updateCheckResult?.hasUpdate}
+        <span class="update-badge">新版本</span>
+      {/if}
+    </button>
   </aside>
 
   <main>
@@ -2153,6 +2233,125 @@
             ><button class="secondary" onclick={resetPlayer}
               >恢复自动发现</button
             >
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-card update-card">
+        <div class="settings-icon update-icon">
+          <Icon name="download" size={22} />
+        </div>
+        <div class="settings-copy">
+          <div class="settings-title">
+            <h2>软件更新</h2>
+            {#if updateCheckResult}
+              <span class:available={updateCheckResult.hasUpdate}>
+                {updateCheckResult.hasUpdate
+                  ? `发现新版本 v${updateCheckResult.latestVersion}`
+                  : '已是最新版本'}
+              </span>
+            {/if}
+          </div>
+
+          <div class="update-summary-row">
+            <span class="update-app-info">
+              <strong
+                >{updateCheckResult?.distributionName ??
+                  'mpv-enjoy Home'}</strong
+              >
+              {#if appVersion}
+                <span class="current-version-tag">当前版本: v{appVersion}</span>
+              {/if}
+              {#if updateCheckResult}
+                <span class="install-type-tag"
+                  >{installTypeLabel(updateCheckResult.installType)}</span
+                >
+              {/if}
+            </span>
+          </div>
+
+          {#if updateCheckResult?.hasUpdate}
+            <div class="update-detail-panel">
+              <div class="update-detail-header">
+                <div>
+                  <span class="new-version-badge"
+                    >最新版本：v{updateCheckResult.latestVersion}</span
+                  >
+                  {#if updateCheckResult.publishedAt}
+                    <small class="update-date"
+                      >{new Date(
+                        updateCheckResult.publishedAt,
+                      ).toLocaleDateString('zh-CN')}</small
+                    >
+                  {/if}
+                </div>
+              </div>
+
+              {#if updateCheckResult.releaseNotes}
+                <div class="update-notes">
+                  <pre>{updateCheckResult.releaseNotes}</pre>
+                </div>
+              {/if}
+
+              {#if updateCheckResult.matchedAsset}
+                <div class="matched-asset-info">
+                  <span class="asset-name"
+                    >{updateCheckResult.matchedAsset.name}</span
+                  >
+                  <span class="asset-size"
+                    >({formatBytes(updateCheckResult.matchedAsset.size)})</span
+                  >
+                </div>
+              {:else}
+                <div class="matched-asset-info">
+                  <span class="asset-name"
+                    >未找到与当前安装类型匹配的自动更新包，可前往 Release
+                    页面手动下载。</span
+                  >
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          <div class="settings-actions">
+            {#if updateCheckResult?.hasUpdate && updateCheckResult.matchedAsset}
+              <button class="primary" disabled={updating} onclick={applyUpdate}>
+                <Icon name="download" />
+                {#if updateCheckResult.matchedAsset.name
+                  .toLowerCase()
+                  .endsWith('.dmg')}
+                  {updating ? '正在下载...' : '下载并打开 DMG'}
+                {:else if updateCheckResult.matchedAsset.name
+                  .toLowerCase()
+                  .endsWith('.zip')}
+                  {updating ? '正在更新...' : '立即覆盖更新并重启'}
+                {:else}
+                  {updating ? '正在下载...' : '下载并运行安装'}
+                {/if}
+              </button>
+            {/if}
+
+            <button
+              class="secondary"
+              disabled={checkingUpdate || updating}
+              onclick={() => void checkUpdate(false)}
+            >
+              <Icon name="refresh" />
+              {checkingUpdate ? '正在检查...' : '检查更新'}
+            </button>
+
+            {#if updateCheckResult?.releaseUrl}
+              <button
+                class={updateCheckResult.hasUpdate &&
+                !updateCheckResult.matchedAsset
+                  ? 'primary'
+                  : 'secondary'}
+                type="button"
+                onclick={() => openExternal(updateCheckResult!.releaseUrl)}
+              >
+                前往 Release 页面
+              </button>
+            {/if}
           </div>
         </div>
       </section>

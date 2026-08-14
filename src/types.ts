@@ -169,3 +169,30 @@ export interface AppearanceSettings {
   themeMode: ThemeMode;
   accentColor: AccentColor;
 }
+
+export type AppInstallType = 'mac-app' | 'windows-setup' | 'windows-portable';
+
+export interface UpdateReleaseAsset {
+  name: string;
+  downloadUrl: string;
+  size: number;
+}
+
+export interface UpdateCheckResult {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  releaseName: string;
+  releaseNotes: string;
+  publishedAt: string | null;
+  releaseUrl: string;
+  installType: AppInstallType;
+  matchedAsset: UpdateReleaseAsset | null;
+  distributionName: string;
+}
+
+export interface UpdateApplyResult {
+  action: string;
+  message: string;
+  requiresRestart: boolean;
+}

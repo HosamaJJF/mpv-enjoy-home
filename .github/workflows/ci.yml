@@ -117,3 +117,23 @@ jobs:
 
       - name: Build desktop application
         run: npm run tauri build -- --no-bundle
+
+      - name: Package Windows test bundle
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p build/test-artifacts/windows-x64
+          cp src-tauri/target/release/mpv-enjoy-home.exe build/test-artifacts/windows-x64/
+          cp LICENSE build/test-artifacts/windows-x64/
+          powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
+            "Compress-Archive -Path 'build/test-artifacts/windows-x64/*' -DestinationPath 'build/test-artifacts/mpv-enjoy-home-windows-x64.zip' -Force"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpv-enjoy-home-${{ matrix.label }}
+          path: |
+            build/test-artifacts/mpv-enjoy-home-windows-x64.zip
+            src-tauri/target/release/mpv-enjoy-home.exe
+            src-tauri/target/release/mpv-enjoy-home
+          if-no-files-found: ignore

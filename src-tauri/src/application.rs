@@ -1,7 +1,7 @@
 use crate::domain::{
     AppearanceSettings, FolderSummary, LibraryEntry, MediaItem, MediaServerCredentials,
     MediaServerInput, MediaServerSummary, PlayerPreferences, PlayerStatus, RecentMediaItem,
-    RemoteLibraryEntry, RemoteMediaDetail, natural_cmp,
+    RemoteLibraryEntry, RemoteMediaDetail, UpdateApplyResult, UpdateCheckResult, natural_cmp,
 };
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::database::Database;
@@ -12,6 +12,7 @@ use crate::infrastructure::remote::{
     RemoteClient, authentication_required, requires_authentication,
 };
 use crate::infrastructure::scanner::scan_media;
+use crate::infrastructure::updater::UpdateManager;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -38,6 +39,7 @@ impl AppService {
     pub fn initialize(&self) -> AppResult<()> {
         self.database.initialize()?;
         self.remote_device_id()?;
+        UpdateManager::cleanup_old_files();
         Ok(())
     }
 
@@ -501,6 +503,20 @@ impl AppService {
         self.database
             .set_setting(REMOTE_DEVICE_ID_SETTING, Some(&device_id))?;
         Ok(device_id)
+    }
+
+    pub fn check_app_update(&self) -> AppResult<UpdateCheckResult> {
+        let manager = UpdateManager::new();
+        manager.check_for_updates()
+    }
+
+    pub fn download_and_apply_update(
+        &self,
+        download_url: &str,
+        file_name: &str,
+    ) -> AppResult<UpdateApplyResult> {
+        let manager = UpdateManager::new();
+        manager.download_and_apply(download_url, file_name)
     }
 }
 

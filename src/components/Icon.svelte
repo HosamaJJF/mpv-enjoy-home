@@ -2,6 +2,7 @@
   type IconName =
     | 'add'
     | 'back'
+    | 'download'
     | 'folder'
     | 'home'
     | 'library'
@@ -31,6 +32,10 @@
 >
   {#if name === 'home'}
     <path d="m3 10 9-7 9 7v9a2 2 0 0 1-2 2h-5v-7h-4v7H5a2 2 0 0 1-2-2Z" />
+  {:else if name === 'download'}
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
   {:else if name === 'library'}
     <path
       d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"

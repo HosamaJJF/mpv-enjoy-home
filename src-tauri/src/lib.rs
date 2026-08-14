@@ -51,6 +51,9 @@ pub fn run() {
             commands::set_player_executable,
             commands::play_media,
             commands::play_remote_media,
+            commands::check_app_update,
+            commands::download_and_apply_update,
+            commands::open_external_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running mpv-enjoy Home");

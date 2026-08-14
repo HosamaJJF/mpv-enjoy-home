@@ -288,6 +288,45 @@ pub struct AppearanceSettings {
     pub accent_color: AccentColor,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AppInstallType {
+    MacApp,
+    WindowsSetup,
+    WindowsPortable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateReleaseAsset {
+    pub name: String,
+    pub download_url: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheckResult {
+    pub current_version: String,
+    pub latest_version: String,
+    pub has_update: bool,
+    pub release_name: String,
+    pub release_notes: String,
+    pub published_at: Option<String>,
+    pub release_url: String,
+    pub install_type: AppInstallType,
+    pub matched_asset: Option<UpdateReleaseAsset>,
+    pub distribution_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateApplyResult {
+    pub action: String,
+    pub message: String,
+    pub requires_restart: bool,
+}
+
 pub fn is_media_extension(extension: &str) -> bool {
     MEDIA_EXTENSIONS.binary_search(&extension).is_ok()
 }
@@ -338,6 +377,31 @@ pub fn natural_cmp(left: &str, right: &str) -> Ordering {
     left_bytes.len().cmp(&right_bytes.len())
 }
 
+pub fn parse_version_core(version: &str) -> Vec<u64> {
+    let clean = version.trim().trim_start_matches(['v', 'V']);
+    let core = clean.split(['-', '+']).next().unwrap_or("");
+    core.split('.')
+        .filter_map(|part| part.parse::<u64>().ok())
+        .collect()
+}
+
+pub fn is_newer_version(latest: &str, current: &str) -> bool {
+    let latest_parts = parse_version_core(latest);
+    let current_parts = parse_version_core(current);
+
+    let max_len = latest_parts.len().max(current_parts.len());
+    for i in 0..max_len {
+        let l = latest_parts.get(i).copied().unwrap_or(0);
+        let c = current_parts.get(i).copied().unwrap_or(0);
+        match l.cmp(&c) {
+            Ordering::Greater => return true,
+            Ordering::Less => return false,
+            Ordering::Equal => {}
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,5 +431,16 @@ mod tests {
             preferences.danmaku_style,
             DanmakuStylePreferences::default()
         );
+    }
+
+    #[test]
+    fn compares_versions_correctly() {
+        assert!(is_newer_version("v1.0.3", "1.0.2"));
+        assert!(is_newer_version("1.1.0", "1.0.9"));
+        assert!(is_newer_version("2.0.0", "1.99.99"));
+        assert!(!is_newer_version("1.0.2", "1.0.2"));
+        assert!(!is_newer_version("v1.0.2", "1.0.2"));
+        assert!(!is_newer_version("1.0.1", "1.0.2"));
+        assert!(!is_newer_version("0.9.9", "1.0.0"));
     }
 }
