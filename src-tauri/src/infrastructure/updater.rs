@@ -154,11 +154,16 @@ impl UpdateManager {
 
         let matched_asset = self.match_release_asset(&release.assets, install_type);
 
+        let release_name = release
+            .name
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| release.tag_name.clone());
+
         Ok(UpdateCheckResult {
             current_version: self.config.current_version.clone(),
             latest_version,
             has_update,
-            release_name: release.name.unwrap_or_else(|| release.tag_name.clone()),
+            release_name,
             release_notes: release.body.unwrap_or_default(),
             published_at: release.published_at,
             release_url: release.html_url,
@@ -595,5 +600,52 @@ mod tests {
         assert!(result.matched_asset.is_some());
 
         mock_server.join().unwrap();
+    }
+
+    #[test]
+    fn matches_mpv_enjoy_distribution_releases_correctly() {
+        let manager = UpdateManager::with_config(UpdateSourceConfig {
+            repo_owner: "HosamaJJF".to_string(),
+            repo_name: "mpv-enjoy".to_string(),
+            asset_prefix: "mpv-enjoy".to_string(),
+            distribution_name: "mpv-enjoy 整合包".to_string(),
+            current_version: "1.0.2".to_string(),
+            api_endpoint: None,
+        });
+
+        let assets = vec![
+            GitHubAsset {
+                name: "mpv-enjoy-1.2.2-macos-arm64.dmg".to_string(),
+                browser_download_url: "https://example.com/mpv-enjoy-arm64.dmg".to_string(),
+                size: 99721028,
+            },
+            GitHubAsset {
+                name: "mpv-enjoy-1.2.2-macos-x64.dmg".to_string(),
+                browser_download_url: "https://example.com/mpv-enjoy-x64.dmg".to_string(),
+                size: 68479745,
+            },
+            GitHubAsset {
+                name: "mpv-enjoy-1.2.2-windows-x64.zip".to_string(),
+                browser_download_url: "https://example.com/mpv-enjoy-win-x64.zip".to_string(),
+                size: 106819218,
+            },
+            GitHubAsset {
+                name: "SHA256SUMS".to_string(),
+                browser_download_url: "https://example.com/SHA256SUMS".to_string(),
+                size: 292,
+            },
+        ];
+
+        let mac_asset = manager.match_release_asset(&assets, AppInstallType::MacApp);
+        assert!(mac_asset.is_some());
+        assert!(mac_asset.unwrap().name.starts_with("mpv-enjoy-"));
+
+        let win_portable_asset =
+            manager.match_release_asset(&assets, AppInstallType::WindowsPortable);
+        assert!(win_portable_asset.is_some());
+        assert_eq!(
+            win_portable_asset.unwrap().name,
+            "mpv-enjoy-1.2.2-windows-x64.zip"
+        );
     }
 }
