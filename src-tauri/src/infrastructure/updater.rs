@@ -254,28 +254,6 @@ impl UpdateManager {
                     assets
                         .iter()
                         .find(|asset| asset.name.to_lowercase().ends_with(".zip"))
-                })
-                .or_else(|| {
-                    assets.iter().find(|asset| {
-                        let name = asset.name.to_lowercase();
-                        name.starts_with(&prefix)
-                            && name.contains("windows-x64")
-                            && (name.ends_with("-setup.exe") || name.ends_with(".msi"))
-                    })
-                })
-                .or_else(|| {
-                    assets.iter().find(|asset| {
-                        let name = asset.name.to_lowercase();
-                        name.contains("windows-x64")
-                            && (name.ends_with("-setup.exe") || name.ends_with(".msi"))
-                    })
-                })
-                .or_else(|| {
-                    assets.iter().find(|asset| {
-                        let name = asset.name.to_lowercase();
-                        name.ends_with("-setup.exe")
-                            || (name.ends_with(".exe") && !name.ends_with(".zip"))
-                    })
                 }),
         };
 
@@ -729,7 +707,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_windows_portable_fallback_to_setup_exe() {
+    fn windows_portable_returns_none_when_no_zip_available() {
         let manager = UpdateManager::with_config(UpdateSourceConfig {
             repo_owner: "HosamaJJF".to_string(),
             repo_name: "mpv-enjoy-home".to_string(),
@@ -753,10 +731,6 @@ mod tests {
         ];
 
         let matched = manager.match_release_asset(&assets, AppInstallType::WindowsPortable);
-        assert!(matched.is_some());
-        assert_eq!(
-            matched.unwrap().name,
-            "mpv-enjoy-home_1.0.2_windows-x64-setup.exe"
-        );
+        assert!(matched.is_none());
     }
 }
