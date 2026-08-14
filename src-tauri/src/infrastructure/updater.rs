@@ -34,6 +34,7 @@ pub struct UpdateSourceConfig {
     pub asset_prefix: String,
     pub distribution_name: String,
     pub current_version: String,
+    pub api_endpoint: Option<String>,
 }
 
 pub struct UpdateManager {
@@ -53,7 +54,8 @@ impl UpdateManager {
     }
 
     pub fn detect_distribution() -> UpdateSourceConfig {
-        let current_version = env!("CARGO_PKG_VERSION").to_string();
+        let current_version = std::env::var("MPV_ENJOY_FORCE_CURRENT_VERSION")
+            .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
 
         let is_integrated = if std::env::var_os("MPV_ENJOY_DISTRIBUTION").is_some() {
             true
@@ -78,6 +80,7 @@ impl UpdateManager {
                 asset_prefix: "mpv-enjoy".to_string(),
                 distribution_name: "mpv-enjoy 整合包".to_string(),
                 current_version,
+                api_endpoint: None,
             }
         } else {
             UpdateSourceConfig {
@@ -86,6 +89,7 @@ impl UpdateManager {
                 asset_prefix: "mpv-enjoy-home".to_string(),
                 distribution_name: "mpv-enjoy Home".to_string(),
                 current_version,
+                api_endpoint: None,
             }
         }
     }
@@ -109,10 +113,14 @@ impl UpdateManager {
     }
 
     pub fn check_for_updates(&self) -> Result<UpdateCheckResult, AppError> {
-        let url = format!(
-            "https://api.github.com/repos/{}/{}/releases/latest",
-            self.config.repo_owner, self.config.repo_name
-        );
+        let url = self.config.api_endpoint.clone().unwrap_or_else(|| {
+            std::env::var("MPV_ENJOY_UPDATE_URL").unwrap_or_else(|_| {
+                format!(
+                    "https://api.github.com/repos/{}/{}/releases/latest",
+                    self.config.repo_owner, self.config.repo_name
+                )
+            })
+        });
 
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(12))
@@ -475,6 +483,7 @@ mod tests {
             asset_prefix: "mpv-enjoy-home".to_string(),
             distribution_name: "mpv-enjoy Home".to_string(),
             current_version: "1.0.2".to_string(),
+            api_endpoint: None,
         });
 
         let assets = vec![
@@ -518,5 +527,73 @@ mod tests {
             win_portable_asset.unwrap().name,
             "mpv-enjoy-home-1.0.3-windows-x64.zip"
         );
+    }
+
+    #[test]
+    fn checks_updates_against_mock_endpoint() {
+        use std::io::Write;
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let mock_server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let body = r##"{
+                "tag_name": "v9.9.9",
+                "name": "v9.9.9 带来更强大的功能",
+                "body": "新功能说明：支持多平台更新",
+                "html_url": "https://github.com/HosamaJJF/mpv-enjoy-home/releases/tag/v9.9.9",
+                "published_at": "2026-08-14T12:00:00Z",
+                "assets": [
+                    {
+                        "name": "mpv-enjoy-home-9.9.9-macos-arm64.dmg",
+                        "browser_download_url": "https://github.com/example/arm64.dmg",
+                        "size": 42000000
+                    },
+                    {
+                        "name": "mpv-enjoy-home-9.9.9-macos-x64.dmg",
+                        "browser_download_url": "https://github.com/example/x64.dmg",
+                        "size": 42000000
+                    },
+                    {
+                        "name": "mpv-enjoy-home-9.9.9-windows-x64-setup.exe",
+                        "browser_download_url": "https://github.com/example/setup.exe",
+                        "size": 45000000
+                    },
+                    {
+                        "name": "mpv-enjoy-home-9.9.9-windows-x64.zip",
+                        "browser_download_url": "https://github.com/example/portable.zip",
+                        "size": 35000000
+                    }
+                ]
+            }"##;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let test_url = format!("http://127.0.0.1:{port}/releases/latest");
+        let manager = UpdateManager::with_config(UpdateSourceConfig {
+            repo_owner: "HosamaJJF".to_string(),
+            repo_name: "mpv-enjoy-home".to_string(),
+            asset_prefix: "mpv-enjoy-home".to_string(),
+            distribution_name: "mpv-enjoy Home".to_string(),
+            current_version: "1.0.2".to_string(),
+            api_endpoint: Some(test_url),
+        });
+
+        let result = manager.check_for_updates().unwrap();
+
+        assert_eq!(result.current_version, "1.0.2");
+        assert_eq!(result.latest_version, "9.9.9");
+        assert!(result.has_update);
+        assert_eq!(result.release_name, "v9.9.9 带来更强大的功能");
+        assert!(result.matched_asset.is_some());
+
+        mock_server.join().unwrap();
     }
 }
