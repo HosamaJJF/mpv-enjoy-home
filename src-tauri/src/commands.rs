@@ -2,7 +2,7 @@ use crate::application::AppService;
 use crate::domain::{
     AppearanceSettings, FolderSummary, LibraryEntry, MediaItem, MediaServerCredentials,
     MediaServerInput, MediaServerSummary, PlayerPreferences, PlayerStatus, RecentMediaItem,
-    RemoteLibraryEntry, RemoteMediaDetail,
+    RemoteLibraryEntry, RemoteMediaDetail, UpdateApplyResult, UpdateCheckResult,
 };
 use std::path::PathBuf;
 use tauri::State;
@@ -243,4 +243,58 @@ pub async fn play_remote_media(
         .await
         .map_err(|error| format!("远程播放任务失败：{error}"))?
         .map_err(|error| error.0)
+}
+
+#[tauri::command]
+pub async fn check_app_update(state: State<'_, AppState>) -> Result<UpdateCheckResult, String> {
+    let service = state.service.clone();
+    tauri::async_runtime::spawn_blocking(move || service.check_app_update())
+        .await
+        .map_err(|error| format!("检查更新任务失败：{error}"))?
+        .map_err(|error| error.0)
+}
+
+#[tauri::command]
+pub async fn download_and_apply_update(
+    state: State<'_, AppState>,
+    download_url: String,
+    file_name: String,
+) -> Result<UpdateApplyResult, String> {
+    let service = state.service.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.download_and_apply_update(&download_url, &file_name)
+    })
+    .await
+    .map_err(|error| format!("更新执行任务失败：{error}"))?
+    .map_err(|error| error.0)
+}
+
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err("仅支持打开标准网络链接".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("打开外部链接失败：{e}"))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map_err(|e| format!("打开外部链接失败：{e}"))?;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("打开外部链接失败：{e}"))?;
+    }
+    Ok(())
 }
