@@ -164,7 +164,7 @@ jobs:
 
       - name: Upload Windows candidate artifacts
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mpv-enjoy-home-${{ steps.package_windows_candidate.outputs.version }}-windows-x64-candidate
           path: |
