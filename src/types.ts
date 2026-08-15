@@ -170,11 +170,14 @@ export interface AppearanceSettings {
   accentColor: AccentColor;
 }
 
-export type AppInstallType = 'mac-app' | 'windows-setup' | 'windows-portable';
+export type AppInstallType =
+  | 'mac-app'
+  | 'windows-setup'
+  | 'windows-portable'
+  | 'windows-installed-unknown';
 
 export interface UpdateReleaseAsset {
   name: string;
-  downloadUrl: string;
   size: number;
 }
 
@@ -185,14 +188,15 @@ export interface UpdateCheckResult {
   releaseName: string;
   releaseNotes: string;
   publishedAt: string | null;
-  releaseUrl: string;
   installType: AppInstallType;
   matchedAsset: UpdateReleaseAsset | null;
   distributionName: string;
 }
 
+export type UpdateAction =
+  'opened_dmg' | 'started_installer' | 'downloaded_portable_archive';
+
 export interface UpdateApplyResult {
-  action: string;
+  action: UpdateAction;
   message: string;
-  requiresRestart: boolean;
 }

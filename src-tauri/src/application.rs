@@ -39,7 +39,6 @@ impl AppService {
     pub fn initialize(&self) -> AppResult<()> {
         self.database.initialize()?;
         self.remote_device_id()?;
-        UpdateManager::cleanup_old_files();
         Ok(())
     }
 
@@ -506,17 +505,18 @@ impl AppService {
     }
 
     pub fn check_app_update(&self) -> AppResult<UpdateCheckResult> {
-        let manager = UpdateManager::new();
+        let manager = UpdateManager::new()?;
         manager.check_for_updates()
     }
 
-    pub fn download_and_apply_update(
-        &self,
-        download_url: &str,
-        file_name: &str,
-    ) -> AppResult<UpdateApplyResult> {
-        let manager = UpdateManager::new();
-        manager.download_and_apply(download_url, file_name)
+    pub fn download_and_apply_update(&self) -> AppResult<UpdateApplyResult> {
+        let manager = UpdateManager::new()?;
+        manager.download_latest_update()
+    }
+
+    pub fn open_update_release(&self) -> AppResult<()> {
+        let manager = UpdateManager::new()?;
+        manager.open_release_page()
     }
 }
 

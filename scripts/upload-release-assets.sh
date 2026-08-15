@@ -52,6 +52,7 @@ case "${TARGET}" in
     mkdir "${PORTABLE_DIR}"
     cp ../mpv-enjoy-home.exe "${PORTABLE_DIR}/mpv-enjoy-home.exe"
     cp "${PROJECT_DIR}/LICENSE" "${PORTABLE_DIR}/LICENSE"
+    touch "${PORTABLE_DIR}/.mpv-enjoy-home-portable"
     PORTABLE_SOURCE="${PORTABLE_DIR}" \
       PORTABLE_DESTINATION="${WINDOWS_PREFIX}.zip" \
       powershell.exe -NoLogo -NoProfile -NonInteractive -Command \

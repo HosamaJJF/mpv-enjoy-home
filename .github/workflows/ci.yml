@@ -116,24 +116,61 @@ jobs:
         run: npm ci
 
       - name: Build desktop application
+        if: runner.os != 'Windows'
         run: npm run tauri build -- --no-bundle
 
-      - name: Package Windows test bundle
+      - name: Build Windows candidate bundles
+        if: runner.os == 'Windows'
+        run: npm run tauri build
+
+      - name: Package Windows candidate bundles
+        id: package_windows_candidate
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          mkdir -p build/test-artifacts/windows-x64
-          cp src-tauri/target/release/mpv-enjoy-home.exe build/test-artifacts/windows-x64/
-          cp LICENSE build/test-artifacts/windows-x64/
-          powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
-            "Compress-Archive -Path 'build/test-artifacts/windows-x64/*' -DestinationPath 'build/test-artifacts/mpv-enjoy-home-windows-x64.zip' -Force"
+          VERSION="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
+          PREFIX="mpv-enjoy-home-${VERSION}-windows-x64"
+          OUTPUT_DIR="build/test-artifacts"
+          PORTABLE_DIR="${OUTPUT_DIR}/${PREFIX}"
 
-      - name: Upload build artifact
+          shopt -s nullglob
+          NSIS_BUNDLES=(src-tauri/target/release/bundle/nsis/*.exe)
+          MSI_BUNDLES=(src-tauri/target/release/bundle/msi/*.msi)
+          if [[ "${#NSIS_BUNDLES[@]}" -ne 1 || "${#MSI_BUNDLES[@]}" -ne 1 ]]; then
+            echo "expected exactly one NSIS and one MSI bundle" >&2
+            exit 1
+          fi
+
+          mkdir -p "${PORTABLE_DIR}"
+          cp "${NSIS_BUNDLES[0]}" "${OUTPUT_DIR}/${PREFIX}-setup.exe"
+          cp "${MSI_BUNDLES[0]}" "${OUTPUT_DIR}/${PREFIX}.msi"
+          cp src-tauri/target/release/mpv-enjoy-home.exe "${PORTABLE_DIR}/"
+          cp LICENSE "${PORTABLE_DIR}/"
+          touch "${PORTABLE_DIR}/.mpv-enjoy-home-portable"
+          CANDIDATE_SOURCE="${PORTABLE_DIR}" \
+            CANDIDATE_DESTINATION="${OUTPUT_DIR}/${PREFIX}.zip" \
+          powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
+            'Compress-Archive -LiteralPath $env:CANDIDATE_SOURCE -DestinationPath $env:CANDIDATE_DESTINATION -CompressionLevel Optimal -Force'
+
+          tar -tf "${OUTPUT_DIR}/${PREFIX}.zip" \
+            | grep -Fxq "${PREFIX}/.mpv-enjoy-home-portable"
+          cd "${OUTPUT_DIR}"
+          sha256sum \
+            "${PREFIX}-setup.exe" \
+            "${PREFIX}.msi" \
+            "${PREFIX}.zip" \
+            >SHA256SUMS.txt
+          echo "version=${VERSION}" >>"${GITHUB_OUTPUT}"
+
+      - name: Upload Windows candidate artifacts
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: mpv-enjoy-home-${{ matrix.label }}
+          name: mpv-enjoy-home-${{ steps.package_windows_candidate.outputs.version }}-windows-x64-candidate
           path: |
-            build/test-artifacts/mpv-enjoy-home-windows-x64.zip
-            src-tauri/target/release/mpv-enjoy-home.exe
-            src-tauri/target/release/mpv-enjoy-home
-          if-no-files-found: ignore
+            build/test-artifacts/mpv-enjoy-home-${{ steps.package_windows_candidate.outputs.version }}-windows-x64-setup.exe
+            build/test-artifacts/mpv-enjoy-home-${{ steps.package_windows_candidate.outputs.version }}-windows-x64.msi
+            build/test-artifacts/mpv-enjoy-home-${{ steps.package_windows_candidate.outputs.version }}-windows-x64.zip
+            build/test-artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
