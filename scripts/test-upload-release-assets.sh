@@ -13,6 +13,7 @@ trap cleanup EXIT
 
 mkdir -p "${TEST_PROJECT}/scripts"
 cp "${PROJECT_DIR}/scripts/upload-release-assets.sh" "${TEST_PROJECT}/scripts/"
+cp "${PROJECT_DIR}/scripts/create-portable-zip.ps1" "${TEST_PROJECT}/scripts/"
 cp "${PROJECT_DIR}/LICENSE" "${TEST_PROJECT}/LICENSE"
 
 WINDOWS_RELEASE="${TEST_PROJECT}/src-tauri/target/x86_64-pc-windows-msvc/release"

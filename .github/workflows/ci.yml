@@ -147,10 +147,10 @@ jobs:
           cp src-tauri/target/release/mpv-enjoy-home.exe "${PORTABLE_DIR}/"
           cp LICENSE "${PORTABLE_DIR}/"
           touch "${PORTABLE_DIR}/.mpv-enjoy-home-portable"
-          CANDIDATE_SOURCE="${PORTABLE_DIR}" \
-            CANDIDATE_DESTINATION="${OUTPUT_DIR}/${PREFIX}.zip" \
-          powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
-            'Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::CreateFromDirectory([IO.Path]::GetFullPath($env:CANDIDATE_SOURCE), [IO.Path]::GetFullPath($env:CANDIDATE_DESTINATION), [IO.Compression.CompressionLevel]::Optimal, $true)'
+          PORTABLE_SOURCE="${PORTABLE_DIR}" \
+            PORTABLE_DESTINATION="${OUTPUT_DIR}/${PREFIX}.zip" \
+          powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+            -File scripts/create-portable-zip.ps1
 
           tar -tf "${OUTPUT_DIR}/${PREFIX}.zip" \
             | grep -Fxq "${PREFIX}/.mpv-enjoy-home-portable"

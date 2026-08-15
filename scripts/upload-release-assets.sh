@@ -55,8 +55,8 @@ case "${TARGET}" in
     touch "${PORTABLE_DIR}/.mpv-enjoy-home-portable"
     PORTABLE_SOURCE="${PORTABLE_DIR}" \
       PORTABLE_DESTINATION="${WINDOWS_PREFIX}.zip" \
-      powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
-      'Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::CreateFromDirectory([IO.Path]::GetFullPath($env:PORTABLE_SOURCE), [IO.Path]::GetFullPath($env:PORTABLE_DESTINATION), [IO.Compression.CompressionLevel]::Optimal, $true)'
+      powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+      -File "${PROJECT_DIR}/scripts/create-portable-zip.ps1"
 
     upload "${WINDOWS_PREFIX}-setup.exe"
     upload "${WINDOWS_PREFIX}.msi"
