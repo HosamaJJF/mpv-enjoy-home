@@ -52,10 +52,11 @@ case "${TARGET}" in
     mkdir "${PORTABLE_DIR}"
     cp ../mpv-enjoy-home.exe "${PORTABLE_DIR}/mpv-enjoy-home.exe"
     cp "${PROJECT_DIR}/LICENSE" "${PORTABLE_DIR}/LICENSE"
+    touch "${PORTABLE_DIR}/.mpv-enjoy-home-portable"
     PORTABLE_SOURCE="${PORTABLE_DIR}" \
       PORTABLE_DESTINATION="${WINDOWS_PREFIX}.zip" \
-      powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
-      'Compress-Archive -LiteralPath $env:PORTABLE_SOURCE -DestinationPath $env:PORTABLE_DESTINATION -CompressionLevel Optimal -Force'
+      powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+      -File "${PROJECT_DIR}/scripts/create-portable-zip.ps1"
 
     upload "${WINDOWS_PREFIX}-setup.exe"
     upload "${WINDOWS_PREFIX}.msi"

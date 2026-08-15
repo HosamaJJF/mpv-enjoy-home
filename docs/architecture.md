@@ -2,8 +2,8 @@
 
 ## 边界
 
-mpv-enjoy Home 只负责媒体发现、索引、媒体服务器浏览和播放请求，不接管 mpv 的解码、
-渲染、Lua 脚本或用户配置。当前播放器实现是独立进程，首页不通过 shell 拼接命令。
+mpv-enjoy Home 只负责媒体发现、索引、媒体服务器浏览、播放请求和经过约束的软件更新，不接管
+mpv 的解码、渲染、Lua 脚本或用户配置。当前播放器实现是独立进程，首页不通过 shell 拼接命令。
 
 ```text
 Svelte UI
@@ -17,6 +17,8 @@ Svelte UI
       -> PlayerBackend
            -> ProcessPlayerBackend + private JSON IPC monitor (current)
            -> libmpv backend (possible)
+      -> UpdateManager
+           -> trusted GitHub Release metadata + verified release asset
 ```
 
 ## 模块
@@ -24,11 +26,12 @@ Svelte UI
 - `src/`：Svelte UI，只处理展示、交互状态和调用类型化命令。
 - `src-tauri/src/domain.rs`：跨框架领域模型和媒体类型规则。
 - `src-tauri/src/application.rs`：用例编排，不依赖具体 UI。
-- `src-tauri/src/infrastructure/`：SQLite、文件扫描和播放器进程适配。
+- `src-tauri/src/infrastructure/`：SQLite、文件扫描、播放器进程和受限更新适配。
 - `src-tauri/src/commands.rs`：Tauri 边界，把领域错误转换为可显示错误。
 
-WebView 不获得通用 shell 或任意文件系统能力。目录通过系统选择器获得，Rust 层仍会验证
-路径；播放请求使用数据库中的媒体 ID 解析真实路径。
+WebView 不获得通用 shell、任意文件系统或任意下载地址能力。目录通过系统选择器获得，Rust 层
+仍会验证路径；播放请求使用数据库中的媒体 ID 解析真实路径，更新命令也只接受无参数的“检查”、
+“下载匹配包”和“打开项目 Release 页面”意图。
 
 ## 数据模型
 
@@ -105,6 +108,26 @@ schema。UI 根据“跟随系统 / 明亮 / 黑暗”计算当前有效主题�
 `--playlist-start` 从用户选择的文件开始，并用 `sub-auto=exact` 与 `audio-file-auto=exact`
 加载同名或带语言后缀的外挂轨道。远程外挂字幕使用服务器公开的字幕流接口；所有携带访问
 令牌的媒体与轨道 URL 都必须保持与媒体服务器同源。
+
+## 软件更新
+
+`UpdateManager` 是更新来源、安装类型和文件校验的唯一事实来源。默认构建只读取
+`HosamaJJF/mpv-enjoy-home` 的最新已发布 Release；集成发行版必须在编译时同时提供仓库、附件
+前缀、发行版名称、发行版版本和便携标记五项元数据，不能根据可执行文件路径或播放器名称猜测。
+调试构建可以把元数据接口改为本机回环 HTTP 地址以做端到端测试，正式构建不接受运行时更新
+地址覆盖。
+
+更新检查只接受严格 SemVer 标签，并按当前平台和安装类型生成唯一附件名。Release 元数据限制为
+2 MiB 且不跟随重定向；附件必须具有 GitHub 返回的 `sha256` digest、非零且不超过 512 MiB 的
+声明大小，以及与配置仓库、标签和附件名完全一致的 GitHub 下载路径。下载写入权限受限的随机
+临时目录，使用 `create_new` 防覆盖，同时限制实际字节数并在打开前验证大小与 SHA-256；中途失败
+删除不完整文件。下载重定向只允许 GitHub 的 HTTPS 附件主机。
+
+macOS 只打开验证后的对应架构 DMG。Windows 免安装版必须在可执行文件同目录包含发行时注入的
+`.mpv-enjoy-home-portable` 标记，验证 ZIP 后只在资源管理器中定位，由用户退出应用并手动覆盖；
+不再让运行中的程序重命名或覆盖自身。Windows 只有发现同目录 `uninstall.exe` 时才把当前副本
+视为 NSIS 安装版并启动验证后的 setup，其他无法确认的安装器类型只提供 Release 页面，避免
+在 MSI 与 NSIS 之间擅自切换。UI 不接触下载 URL、digest 或临时路径，也不能打开任意外链。
 
 ## 播放器适配
 

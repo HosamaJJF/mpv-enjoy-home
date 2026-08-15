@@ -106,10 +106,7 @@ export const api = {
   playRemoteMedia: (serverId: number, itemId: string) =>
     invoke<void>('play_remote_media', { serverId, itemId }),
   checkAppUpdate: () => invoke<UpdateCheckResult>('check_app_update'),
-  downloadAndApplyUpdate: (downloadUrl: string, fileName: string) =>
-    invoke<UpdateApplyResult>('download_and_apply_update', {
-      downloadUrl,
-      fileName,
-    }),
-  openExternalUrl: (url: string) => invoke<void>('open_external_url', { url }),
+  downloadAndApplyUpdate: () =>
+    invoke<UpdateApplyResult>('download_and_apply_update'),
+  openUpdateRelease: () => invoke<void>('open_update_release'),
 };

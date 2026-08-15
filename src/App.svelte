@@ -235,13 +235,9 @@
 
   async function applyUpdate() {
     if (!updateCheckResult?.matchedAsset || updating) return;
-    const asset = updateCheckResult.matchedAsset;
     updating = true;
     try {
-      const result = await api.downloadAndApplyUpdate(
-        asset.downloadUrl,
-        asset.name,
-      );
+      const result = await api.downloadAndApplyUpdate();
       notify('success', result.message);
     } catch (error) {
       notify('error', `更新失败：${normalizeError(error)}`);
@@ -250,8 +246,12 @@
     }
   }
 
-  function openExternal(url: string) {
-    void api.openExternalUrl(url);
+  async function openUpdateRelease() {
+    try {
+      await api.openUpdateRelease();
+    } catch (error) {
+      notify('error', `打开 Release 页面失败：${normalizeError(error)}`);
+    }
   }
 
   function formatBytes(bytes: number): string {
@@ -270,6 +270,8 @@
         return 'Windows 安装版';
       case 'windows-portable':
         return 'Windows 免安装版';
+      case 'windows-installed-unknown':
+        return 'Windows 安装版（需手动更新）';
     }
   }
 
@@ -2324,7 +2326,7 @@
                 {:else if updateCheckResult.matchedAsset.name
                   .toLowerCase()
                   .endsWith('.zip')}
-                  {updating ? '正在更新...' : '立即覆盖更新并重启'}
+                  {updating ? '正在下载...' : '下载 ZIP 并定位文件'}
                 {:else}
                   {updating ? '正在下载...' : '下载并运行安装'}
                 {/if}
@@ -2340,18 +2342,16 @@
               {checkingUpdate ? '正在检查...' : '检查更新'}
             </button>
 
-            {#if updateCheckResult?.releaseUrl}
-              <button
-                class={updateCheckResult.hasUpdate &&
-                !updateCheckResult.matchedAsset
-                  ? 'primary'
-                  : 'secondary'}
-                type="button"
-                onclick={() => openExternal(updateCheckResult!.releaseUrl)}
-              >
-                前往 Release 页面
-              </button>
-            {/if}
+            <button
+              class={updateCheckResult?.hasUpdate &&
+              !updateCheckResult.matchedAsset
+                ? 'primary'
+                : 'secondary'}
+              type="button"
+              onclick={openUpdateRelease}
+            >
+              前往 Release 页面
+            </button>
           </div>
         </div>
       </section>

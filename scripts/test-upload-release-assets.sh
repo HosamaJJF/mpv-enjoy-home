@@ -13,6 +13,7 @@ trap cleanup EXIT
 
 mkdir -p "${TEST_PROJECT}/scripts"
 cp "${PROJECT_DIR}/scripts/upload-release-assets.sh" "${TEST_PROJECT}/scripts/"
+cp "${PROJECT_DIR}/scripts/create-portable-zip.ps1" "${TEST_PROJECT}/scripts/"
 cp "${PROJECT_DIR}/LICENSE" "${TEST_PROJECT}/LICENSE"
 
 WINDOWS_RELEASE="${TEST_PROJECT}/src-tauri/target/x86_64-pc-windows-msvc/release"
@@ -71,6 +72,7 @@ for expected in \
   "${WINDOWS_BUNDLE}/${WINDOWS_PREFIX}.zip" \
   "${WINDOWS_BUNDLE}/${WINDOWS_PREFIX}/mpv-enjoy-home.exe" \
   "${WINDOWS_BUNDLE}/${WINDOWS_PREFIX}/LICENSE" \
+  "${WINDOWS_BUNDLE}/${WINDOWS_PREFIX}/.mpv-enjoy-home-portable" \
   "${ARM64_BUNDLE}/mpv-enjoy-home-1.2.3-macos-arm64.dmg" \
   "${X64_BUNDLE}/mpv-enjoy-home-1.2.3-macos-x64.dmg"
 do
@@ -79,6 +81,23 @@ do
     exit 1
   fi
 done
+
+if command -v unzip >/dev/null 2>&1; then
+  if ! unzip -Z1 "${WINDOWS_BUNDLE}/${WINDOWS_PREFIX}.zip" \
+    | grep -Fxq "${WINDOWS_PREFIX}/.mpv-enjoy-home-portable"; then
+    echo 'portable marker is missing from Windows ZIP' >&2
+    exit 1
+  fi
+elif command -v tar >/dev/null 2>&1; then
+  if ! tar -tf "${WINDOWS_BUNDLE}/${WINDOWS_PREFIX}.zip" \
+    | grep -Fxq "${WINDOWS_PREFIX}/.mpv-enjoy-home-portable"; then
+    echo 'portable marker is missing from Windows ZIP' >&2
+    exit 1
+  fi
+else
+  echo 'unzip or tar is required to inspect the Windows ZIP fixture' >&2
+  exit 1
+fi
 
 if find "${TEST_PROJECT}/src-tauri/target" -name '*.app.tar.gz' -print -quit | grep -q .; then
   echo 'macOS app archive should not be generated' >&2
