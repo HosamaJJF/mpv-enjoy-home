@@ -56,7 +56,7 @@ case "${TARGET}" in
     PORTABLE_SOURCE="${PORTABLE_DIR}" \
       PORTABLE_DESTINATION="${WINDOWS_PREFIX}.zip" \
       powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
-      'Compress-Archive -LiteralPath $env:PORTABLE_SOURCE -DestinationPath $env:PORTABLE_DESTINATION -CompressionLevel Optimal -Force'
+      'Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::CreateFromDirectory([IO.Path]::GetFullPath($env:PORTABLE_SOURCE), [IO.Path]::GetFullPath($env:PORTABLE_DESTINATION), [IO.Compression.CompressionLevel]::Optimal, $true)'
 
     upload "${WINDOWS_PREFIX}-setup.exe"
     upload "${WINDOWS_PREFIX}.msi"

@@ -150,7 +150,7 @@ jobs:
           CANDIDATE_SOURCE="${PORTABLE_DIR}" \
             CANDIDATE_DESTINATION="${OUTPUT_DIR}/${PREFIX}.zip" \
           powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
-            'Compress-Archive -LiteralPath $env:CANDIDATE_SOURCE -DestinationPath $env:CANDIDATE_DESTINATION -CompressionLevel Optimal -Force'
+            'Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::CreateFromDirectory([IO.Path]::GetFullPath($env:CANDIDATE_SOURCE), [IO.Path]::GetFullPath($env:CANDIDATE_DESTINATION), [IO.Compression.CompressionLevel]::Optimal, $true)'
 
           tar -tf "${OUTPUT_DIR}/${PREFIX}.zip" \
             | grep -Fxq "${PREFIX}/.mpv-enjoy-home-portable"
