@@ -8,6 +8,7 @@ if ([string]::IsNullOrWhiteSpace($env:PORTABLE_DESTINATION)) {
   throw 'PORTABLE_DESTINATION is required'
 }
 
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $sourcePath = ([IO.Path]::GetFullPath($env:PORTABLE_SOURCE)).TrimEnd([char[]]@('\', '/'))
