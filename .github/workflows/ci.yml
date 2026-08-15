@@ -152,7 +152,7 @@ jobs:
           powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
             -File scripts/create-portable-zip.ps1
 
-          tar -tf "${OUTPUT_DIR}/${PREFIX}.zip" \
+          unzip -Z1 "${OUTPUT_DIR}/${PREFIX}.zip" \
             | grep -Fxq "${PREFIX}/.mpv-enjoy-home-portable"
           cd "${OUTPUT_DIR}"
           sha256sum \
