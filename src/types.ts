@@ -49,6 +49,10 @@ export interface MediaServerInput {
   password: string;
 }
 
+export interface MediaServerUpdate extends Omit<MediaServerInput, 'password'> {
+  password: string | null;
+}
+
 export interface MediaServerCredentials {
   username: string;
   password: string;

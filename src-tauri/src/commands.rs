@@ -1,8 +1,8 @@
 use crate::application::AppService;
 use crate::domain::{
     AppearanceSettings, FolderSummary, LibraryEntry, MediaItem, MediaServerCredentials,
-    MediaServerInput, MediaServerSummary, PlayerPreferences, PlayerStatus, RecentMediaItem,
-    RemoteLibraryEntry, RemoteMediaDetail, UpdateApplyResult, UpdateCheckResult,
+    MediaServerInput, MediaServerSummary, MediaServerUpdate, PlayerPreferences, PlayerStatus,
+    RecentMediaItem, RemoteLibraryEntry, RemoteMediaDetail, UpdateApplyResult, UpdateCheckResult,
 };
 use std::path::PathBuf;
 use tauri::State;
@@ -107,6 +107,19 @@ pub async fn add_media_server(
 }
 
 #[tauri::command]
+pub async fn update_media_server(
+    state: State<'_, AppState>,
+    server_id: i64,
+    input: MediaServerUpdate,
+) -> Result<MediaServerSummary, String> {
+    let service = state.service.clone();
+    tauri::async_runtime::spawn_blocking(move || service.update_media_server(server_id, input))
+        .await
+        .map_err(|error| format!("媒体服务器保存任务失败：{error}"))?
+        .map_err(|error| error.0)
+}
+
+#[tauri::command]
 pub async fn reauthenticate_media_server(
     state: State<'_, AppState>,
     server_id: i64,
@@ -122,10 +135,11 @@ pub async fn reauthenticate_media_server(
 }
 
 #[tauri::command]
-pub fn remove_media_server(state: State<'_, AppState>, server_id: i64) -> Result<(), String> {
-    state
-        .service
-        .remove_media_server(server_id)
+pub async fn remove_media_server(state: State<'_, AppState>, server_id: i64) -> Result<(), String> {
+    let service = state.service.clone();
+    tauri::async_runtime::spawn_blocking(move || service.remove_media_server(server_id))
+        .await
+        .map_err(|error| format!("媒体服务器移除任务失败：{error}"))?
         .map_err(|error| error.0)
 }
 

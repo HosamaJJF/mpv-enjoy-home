@@ -954,7 +954,7 @@ pub fn normalize_base_url(value: &str) -> AppResult<String> {
     Ok(url.into())
 }
 
-fn normalize_kind(value: &str) -> AppResult<String> {
+pub(crate) fn normalize_kind(value: &str) -> AppResult<String> {
     let kind = value.trim().to_ascii_lowercase();
     if matches!(kind.as_str(), "emby" | "jellyfin") {
         Ok(kind)
@@ -963,7 +963,7 @@ fn normalize_kind(value: &str) -> AppResult<String> {
     }
 }
 
-fn normalize_username(value: &str) -> AppResult<String> {
+pub(crate) fn normalize_username(value: &str) -> AppResult<String> {
     let username = value.trim();
     if username.is_empty() || username.len() > 256 || username.chars().any(char::is_control) {
         return Err(AppError::message("媒体服务器用户名不能为空或过长"));

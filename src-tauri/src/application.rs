@@ -1,7 +1,8 @@
 use crate::domain::{
-    AppearanceSettings, FolderSummary, LibraryEntry, MediaItem, MediaServerCredentials,
-    MediaServerInput, MediaServerSummary, PlayerPreferences, PlayerStatus, RecentMediaItem,
-    RemoteLibraryEntry, RemoteMediaDetail, UpdateApplyResult, UpdateCheckResult, natural_cmp,
+    AppearanceSettings, FolderSummary, LibraryEntry, MediaItem, MediaServerConfig,
+    MediaServerCredentials, MediaServerInput, MediaServerSummary, MediaServerUpdate,
+    PlayerPreferences, PlayerStatus, RecentMediaItem, RemoteLibraryEntry, RemoteMediaDetail,
+    UpdateApplyResult, UpdateCheckResult, natural_cmp,
 };
 use crate::error::{AppError, AppResult};
 use crate::infrastructure::database::Database;
@@ -9,13 +10,14 @@ use crate::infrastructure::player::{
     PLAYER_SETTING, PlayerBackend, ProcessPlayerBackend, normalize_selected_player,
 };
 use crate::infrastructure::remote::{
-    RemoteClient, authentication_required, requires_authentication,
+    RemoteClient, authentication_required, normalize_base_url, normalize_kind, normalize_username,
+    requires_authentication,
 };
 use crate::infrastructure::scanner::scan_media;
 use crate::infrastructure::updater::UpdateManager;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use uuid::Uuid;
 
 const APPEARANCE_SETTING: &str = "appearance";
@@ -227,6 +229,7 @@ impl AppService {
     }
 
     pub fn add_media_server(&self, input: &MediaServerInput) -> AppResult<MediaServerSummary> {
+        let _guard = self.lock_remote_auth()?;
         let device_id = self.remote_device_id()?;
         let server = RemoteClient::verify(input, &device_id)?;
         self.database.save_media_server(
@@ -241,15 +244,58 @@ impl AppService {
         )
     }
 
+    pub fn update_media_server(
+        &self,
+        server_id: i64,
+        input: MediaServerUpdate,
+    ) -> AppResult<MediaServerSummary> {
+        let name = input.name.trim();
+        if name.is_empty() {
+            return Err(AppError::message("媒体服务器显示名称不能为空"));
+        }
+        let kind = normalize_kind(&input.kind)?;
+        let base_url = normalize_base_url(&input.base_url)?;
+        let username = normalize_username(&input.username)?;
+        let _guard = self.lock_remote_auth()?;
+        let current = self.database.media_server(server_id)?;
+
+        let Some(password) = input.password else {
+            if kind != current.kind
+                || base_url != normalize_base_url(&current.base_url)?
+                || username != current.user_name
+            {
+                return Err(AppError::message("请输入账号密码，或选择无密码账户"));
+            }
+            return self.database.rename_media_server(server_id, name);
+        };
+
+        let input = MediaServerInput {
+            kind,
+            name: name.to_owned(),
+            base_url,
+            username,
+            password,
+        };
+        let verified = RemoteClient::verify(&input, &self.remote_device_id()?)?;
+        self.database.update_media_server(&MediaServerConfig {
+            kind: verified.kind,
+            name: verified.name,
+            base_url: verified.base_url,
+            token: verified.token,
+            user_id: verified.user_id,
+            user_name: verified.user_name,
+            password: Some(input.password),
+            server_version: verified.server_version,
+            ..current
+        })
+    }
+
     pub fn reauthenticate_media_server(
         &self,
         server_id: i64,
         credentials: &MediaServerCredentials,
     ) -> AppResult<MediaServerSummary> {
-        let _guard = self
-            .remote_auth_lock
-            .lock()
-            .map_err(|_| AppError::message("媒体服务器重新登录状态不可用"))?;
+        let _guard = self.lock_remote_auth()?;
         let current = self.database.media_server(server_id)?;
         let device_id = self.remote_device_id()?;
         let verified = match RemoteClient::reauthenticate(&current, credentials, &device_id) {
@@ -270,6 +316,7 @@ impl AppService {
     }
 
     pub fn remove_media_server(&self, server_id: i64) -> AppResult<()> {
+        let _guard = self.lock_remote_auth()?;
         self.database.remove_media_server(server_id)
     }
 
@@ -443,12 +490,15 @@ impl AppService {
             Err(error) => return Err(error),
         };
 
-        let _guard = self
-            .remote_auth_lock
-            .lock()
-            .map_err(|_| AppError::message("媒体服务器重新登录状态不可用"))?;
+        let _guard = self.lock_remote_auth()?;
         let current = self.database.media_server(server_id)?;
-        if current.token != initial.token {
+        if current.kind != initial.kind
+            || current.base_url != initial.base_url
+            || current.user_id != initial.user_id
+        {
+            return Err(AppError::message("服务器连接已更新，请重新打开媒体库"));
+        }
+        if current.token != initial.token || current.password != initial.password {
             let refreshed = RemoteClient::from_config(&current, &device_id)?;
             match action(&refreshed) {
                 Ok(result) => return Ok(result),
@@ -490,6 +540,12 @@ impl AppService {
             ));
         }
         result
+    }
+
+    fn lock_remote_auth(&self) -> AppResult<MutexGuard<'_, ()>> {
+        self.remote_auth_lock
+            .lock()
+            .map_err(|_| AppError::message("媒体服务器登录状态不可用"))
     }
 
     fn remote_device_id(&self) -> AppResult<String> {
@@ -837,6 +893,199 @@ mod tests {
     }
 
     #[test]
+    fn renames_an_offline_media_server_without_credentials() {
+        let path = std::env::temp_dir().join(format!("mpv-home-edit-{}.sqlite3", Uuid::new_v4()));
+        let service = AppService::new(path.clone());
+        service.initialize().unwrap();
+        let saved = service
+            .database
+            .save_media_server(
+                "emby",
+                "旧名称",
+                "http://127.0.0.1:1/emby",
+                "old-token",
+                "old-user-id",
+                "Guest",
+                "old-password",
+                None,
+            )
+            .unwrap();
+        service
+            .database
+            .clear_media_server_password(saved.id)
+            .unwrap();
+        let input = MediaServerUpdate {
+            kind: "emby".into(),
+            name: " 新名称 ".into(),
+            base_url: "http://127.0.0.1:1/emby/".into(),
+            username: "Guest".into(),
+            password: None,
+        };
+        let updated = service.update_media_server(saved.id, input).unwrap();
+        assert_eq!(updated.id, saved.id);
+        assert_eq!(updated.name, "新名称");
+        assert_eq!(updated.added_at, saved.added_at);
+        assert_eq!(updated.last_connected_at, saved.last_connected_at);
+
+        let error = service
+            .update_media_server(
+                saved.id,
+                MediaServerUpdate {
+                    kind: "emby".into(),
+                    name: "待验证的名称".into(),
+                    base_url: "http://127.0.0.1:2/emby".into(),
+                    username: "Guest".into(),
+                    password: None,
+                },
+            )
+            .unwrap_err();
+        assert!(error.0.contains("请输入账号密码"));
+        let config = service.database.media_server(saved.id).unwrap();
+        assert_eq!(config.name, "新名称");
+        assert_eq!(config.base_url, saved.base_url);
+        assert_eq!(config.token, "old-token");
+        assert_eq!(config.password, None);
+        drop(service);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    #[ignore = "需要绑定本机回环端口"]
+    fn edits_a_verified_server_in_place_without_reusing_old_credentials() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+
+        let old_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let target_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let old_url = format!("http://{}/", old_listener.local_addr().unwrap());
+        let target_url = format!("http://{}/", target_listener.local_addr().unwrap());
+        let (request_started, wait_for_request) = channel();
+        let (finish_request, wait_for_edit) = channel();
+        let old_mock = std::thread::spawn(move || {
+            let (mut stream, _) = old_listener.accept().unwrap();
+            let request = read_http_request(&mut stream);
+            assert!(request.starts_with("GET /emby/Users/old-user-id/Views"));
+            request_started.send(()).unwrap();
+            wait_for_edit.recv_timeout(Duration::from_secs(10)).unwrap();
+            write_http_response(&mut stream, "401 Unauthorized", "");
+        });
+        let target_mock = std::thread::spawn(move || {
+            let responses = [
+                ("401 Unauthorized", ""),
+                (
+                    "200 OK",
+                    r#"{"User":{"Id":"existing-id","Name":"Taken"},"AccessToken":"duplicate-token"}"#,
+                ),
+                (
+                    "200 OK",
+                    r#"{"ServerName":"Mock Jellyfin","Version":"10.11.0"}"#,
+                ),
+                ("200 OK", r#"{"Items":[]}"#),
+                (
+                    "200 OK",
+                    r#"{"User":{"Id":"new-user-id","Name":"Guest"},"AccessToken":"new-token"}"#,
+                ),
+                (
+                    "200 OK",
+                    r#"{"ServerName":"Mock Jellyfin","Version":"10.11.0"}"#,
+                ),
+                ("200 OK", r#"{"Items":[]}"#),
+            ];
+            responses.map(|(status, body)| {
+                let (mut stream, _) = target_listener.accept().unwrap();
+                let request = read_http_request(&mut stream);
+                write_http_response(&mut stream, status, body);
+                request
+            })
+        });
+        let path = std::env::temp_dir().join(format!("mpv-home-edit-{}.sqlite3", Uuid::new_v4()));
+        let service = AppService::new(path.clone());
+        service.initialize().unwrap();
+        let saved = service
+            .database
+            .save_media_server(
+                "emby",
+                "旧名称",
+                &old_url,
+                "old-token",
+                "old-user-id",
+                "Old",
+                "old-password",
+                None,
+            )
+            .unwrap();
+        let existing = service
+            .database
+            .save_media_server(
+                "jellyfin",
+                "已有连接",
+                &target_url,
+                "existing-token",
+                "existing-id",
+                "Taken",
+                "existing-password",
+                None,
+            )
+            .unwrap();
+        let update = |username: &str, password: &str| MediaServerUpdate {
+            kind: "jellyfin".into(),
+            name: "新名称".into(),
+            base_url: target_url.clone(),
+            username: username.into(),
+            password: Some(password.into()),
+        };
+        let error = service
+            .update_media_server(saved.id, update("Guest", "wrong-password"))
+            .unwrap_err();
+        assert!(error.0.contains("未接受用户名或密码"));
+        let error = service
+            .update_media_server(saved.id, update("Taken", "existing-password"))
+            .unwrap_err();
+        assert!(error.0.contains("已有连接"));
+        let original = service.database.media_server(saved.id).unwrap();
+        assert_eq!(original.name, saved.name);
+        assert_eq!(original.base_url, old_url);
+        assert_eq!(original.token, "old-token");
+        assert_eq!(original.password.as_deref(), Some("old-password"));
+        let other = service.database.media_server(existing.id).unwrap();
+        assert_eq!(other.name, existing.name);
+        assert_eq!(other.token, "existing-token");
+
+        let requesting = service.clone();
+        let previous_request =
+            std::thread::spawn(move || requesting.list_remote_entries(saved.id, None));
+        wait_for_request
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap();
+        let updated = service
+            .update_media_server(saved.id, update("Guest", ""))
+            .unwrap();
+        finish_request.send(()).unwrap();
+        let stale_error = previous_request.join().unwrap().unwrap_err();
+        assert!(stale_error.0.contains("服务器连接已更新"));
+
+        assert_eq!(updated.id, saved.id);
+        assert_eq!(updated.added_at, saved.added_at);
+        assert_eq!(updated.name, "新名称");
+        assert_eq!(updated.kind, "jellyfin");
+        assert_eq!(updated.base_url, target_url);
+        assert_eq!(updated.user_id, "new-user-id");
+        assert_eq!(updated.user_name, "Guest");
+        assert_eq!(updated.server_version.as_deref(), Some("10.11.0"));
+        let config = service.database.media_server(saved.id).unwrap();
+        assert_eq!(config.token, "new-token");
+        assert_eq!(config.password.as_deref(), Some(""));
+
+        old_mock.join().unwrap();
+        let requests = target_mock.join().unwrap();
+        assert!(requests[4].starts_with("POST /Users/AuthenticateByName"));
+        assert!(requests[4].contains(r#""Pw":"""#));
+        assert!(requests[6].starts_with("GET /Users/new-user-id/Views"));
+        drop(service);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     #[ignore = "需要绑定本机回环端口"]
     fn revoked_remote_token_is_refreshed_with_the_saved_password() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -855,13 +1104,7 @@ mod tests {
                     2 => ("200 OK", r#"{"ServerName":"Mock Emby","Version":"4.9.0"}"#),
                     _ => ("200 OK", r#"{"Items":[]}"#),
                 };
-                write!(
-                    stream,
-                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                )
-                .unwrap();
-                stream.flush().unwrap();
+                write_http_response(&mut stream, status, body);
             }
             requests
         });
@@ -922,6 +1165,16 @@ mod tests {
             Some("Season/file.mkv")
         );
         assert_eq!(strip_parent("Showcase/file.mkv", "Show"), None);
+    }
+
+    fn write_http_response(stream: &mut TcpStream, status: &str, body: &str) {
+        write!(
+            stream,
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        stream.flush().unwrap();
     }
 
     fn read_http_request(stream: &mut TcpStream) -> String {

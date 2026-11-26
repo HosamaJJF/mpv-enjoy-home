@@ -38,6 +38,7 @@ pub fn run() {
             commands::list_recent_media,
             commands::list_media_servers,
             commands::add_media_server,
+            commands::update_media_server,
             commands::reauthenticate_media_server,
             commands::remove_media_server,
             commands::list_remote_entries,

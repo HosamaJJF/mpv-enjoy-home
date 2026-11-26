@@ -3,6 +3,7 @@
     | 'add'
     | 'back'
     | 'download'
+    | 'edit'
     | 'folder'
     | 'home'
     | 'library'
@@ -64,6 +65,10 @@
     <path d="m20 20-4-4" />
   {:else if name === 'add'}
     <path d="M12 5v14M5 12h14" />
+  {:else if name === 'edit'}
+    <path
+      d="m14 6 4 4M4 20l4.5-1L20 7.5a1.5 1.5 0 0 0 0-2.1l-1.4-1.4a1.5 1.5 0 0 0-2.1 0L5 15.5 4 20Z"
+    />
   {:else if name === 'refresh'}
     <path d="M20 6v5h-5M4 18v-5h5" />
     <path d="M18 9a7 7 0 0 0-12-2L4 11M6 15a7 7 0 0 0 12 2l2-4" />

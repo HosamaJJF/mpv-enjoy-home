@@ -89,6 +89,17 @@ pub struct MediaServerInput {
     pub password: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaServerUpdate {
+    pub kind: String,
+    pub name: String,
+    pub base_url: String,
+    pub username: String,
+    // None keeps the current session. An empty string logs in without a password.
+    pub password: Option<String>,
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaServerCredentials {
