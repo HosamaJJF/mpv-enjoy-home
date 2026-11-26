@@ -2,7 +2,7 @@ use crate::domain::{
     DiscoveredMedia, FolderSummary, MediaItem, MediaServerConfig, MediaServerSummary, natural_cmp,
 };
 use crate::error::{AppError, AppResult};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -401,19 +401,7 @@ impl Database {
              FROM media_servers ORDER BY name COLLATE NOCASE, id",
         )?;
         let servers = statement
-            .query_map([], |row| {
-                Ok(MediaServerSummary {
-                    id: row.get(0)?,
-                    kind: row.get(1)?,
-                    name: row.get(2)?,
-                    base_url: row.get(3)?,
-                    user_id: row.get(4)?,
-                    user_name: row.get(5)?,
-                    server_version: row.get(6)?,
-                    added_at: row.get(7)?,
-                    last_connected_at: row.get(8)?,
-                })
-            })?
+            .query_map([], read_media_server_summary)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(servers)
     }
@@ -443,6 +431,54 @@ impl Database {
                 },
             )
             .optional()?
+            .ok_or_else(|| AppError::message("媒体服务器不存在"))
+    }
+
+    pub fn rename_media_server(&self, server_id: i64, name: &str) -> AppResult<MediaServerSummary> {
+        self.open()?
+            .query_row(
+                "UPDATE media_servers SET name = ?1 WHERE id = ?2
+                 RETURNING id, kind, name, base_url, user_id, user_name,
+                           server_version, added_at, last_connected_at",
+                params![name, server_id],
+                read_media_server_summary,
+            )
+            .optional()?
+            .ok_or_else(|| AppError::message("媒体服务器不存在"))
+    }
+
+    pub fn update_media_server(&self, server: &MediaServerConfig) -> AppResult<MediaServerSummary> {
+        self.open()?
+            .query_row(
+                "UPDATE media_servers
+                 SET kind = ?1, name = ?2, base_url = ?3, token = ?4, user_id = ?5,
+                     user_name = ?6, password = ?7, server_version = ?8, last_connected_at = ?9
+                 WHERE id = ?10
+                 RETURNING id, kind, name, base_url, user_id, user_name,
+                           server_version, added_at, last_connected_at",
+                params![
+                    server.kind,
+                    server.name,
+                    server.base_url,
+                    server.token,
+                    server.user_id,
+                    server.user_name,
+                    server.password,
+                    server.server_version,
+                    now_timestamp(),
+                    server.id,
+                ],
+                read_media_server_summary,
+            )
+            .optional()
+            .map_err(|error| match error {
+                rusqlite::Error::SqliteFailure(error, _)
+                    if error.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE =>
+                {
+                    AppError::message("此服务器上的这个账号已有连接")
+                }
+                error => error.into(),
+            })?
             .ok_or_else(|| AppError::message("媒体服务器不存在"))
     }
 
@@ -506,6 +542,20 @@ impl Database {
         }
         Ok(())
     }
+}
+
+fn read_media_server_summary(row: &Row<'_>) -> rusqlite::Result<MediaServerSummary> {
+    Ok(MediaServerSummary {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        name: row.get(2)?,
+        base_url: row.get(3)?,
+        user_id: row.get(4)?,
+        user_name: row.get(5)?,
+        server_version: row.get(6)?,
+        added_at: row.get(7)?,
+        last_connected_at: row.get(8)?,
+    })
 }
 
 fn now_timestamp() -> i64 {

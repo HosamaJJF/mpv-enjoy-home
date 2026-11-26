@@ -7,6 +7,7 @@ import type {
   MediaServerCredentials,
   MediaServerInput,
   MediaServerSummary,
+  MediaServerUpdate,
   PlayerPreferences,
   PlayerStatus,
   RecentMediaItem,
@@ -62,6 +63,8 @@ export const api = {
   listMediaServers: () => invoke<MediaServerSummary[]>('list_media_servers'),
   addMediaServer: (input: MediaServerInput) =>
     invoke<MediaServerSummary>('add_media_server', { input }),
+  updateMediaServer: (serverId: number, input: MediaServerUpdate) =>
+    invoke<MediaServerSummary>('update_media_server', { serverId, input }),
   reauthenticateMediaServer: (
     serverId: number,
     credentials: MediaServerCredentials,

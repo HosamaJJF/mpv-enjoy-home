@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getVersion } from '@tauri-apps/api/app';
   import { open } from '@tauri-apps/plugin-dialog';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import {
     api,
     invokeErrorMessage,
@@ -41,6 +41,14 @@
     name: string;
     mode: 'list' | 'detail';
   };
+  type ServerForm =
+    | { mode: 'add' }
+    | { mode: 'edit'; server: MediaServerSummary }
+    | {
+        mode: 'reauthenticate';
+        server: MediaServerSummary;
+        resumeLibrary: boolean;
+      };
 
   const themeOptions: { value: ThemeMode; label: string }[] = [
     { value: 'system', label: '跟随系统' },
@@ -117,9 +125,10 @@
   let libraryLoading = $state(false);
   let busyMessage = $state('正在整理媒体库…');
   let toast = $state<Toast | null>(null);
-  let showServerForm = $state(false);
-  let reauthenticatingServer = $state<MediaServerSummary | null>(null);
-  let resumeServerAfterLogin = $state(false);
+  let serverForm = $state<ServerForm | null>(null);
+  let serverFormError = $state('');
+  let serverNameInput = $state<HTMLInputElement>();
+  let editPasswordMode = $state<'' | 'replace' | 'none'>('');
   let sidebarCollapsed = $state(false);
   let appearance = $state<AppearanceSettings>({
     themeMode: 'system',
@@ -136,6 +145,16 @@
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let localLoadGeneration = 0;
   let remoteLoadGeneration = 0;
+  let overviewLoadGeneration = 0;
+  let recentLoadGeneration = 0;
+
+  const editRequiresCredentials = $derived(
+    serverForm?.mode === 'edit' &&
+      (serverDraft.kind !== serverForm.server.kind ||
+        serverDraft.baseUrl.trim().replace(/\/+$/, '') !==
+          serverForm.server.baseUrl.replace(/\/+$/, '') ||
+        serverDraft.username.trim() !== serverForm.server.userName),
+  );
 
   const totalMedia = $derived(
     folders.reduce((total, folder) => total + folder.mediaCount, 0),
@@ -353,13 +372,16 @@
       style.displayArea ?? (resetMissing ? 0.85 : danmakuDisplayAreaDraft);
   }
 
-  async function refreshOverview() {
+  async function refreshOverview(loadRecent = true) {
+    const generation = ++overviewLoadGeneration;
     try {
-      [folders, servers, player] = await Promise.all([
+      const overview = await Promise.all([
         api.listFolders(),
         api.listMediaServers(),
         api.getPlayerStatus(),
       ]);
+      if (generation !== overviewLoadGeneration) return;
+      [folders, servers, player] = overview;
       if (selectedSource?.kind === 'local') {
         const selectedFolderId = selectedSource.folder.id;
         const folder = folders.find((entry) => entry.id === selectedFolderId);
@@ -369,9 +391,23 @@
         const server = servers.find((entry) => entry.id === selectedServerId);
         selectedSource = server ? { kind: 'remote', server } : null;
       }
-      recentMedia = await api.listRecentMedia(8);
+      if (loadRecent) await refreshRecentMedia();
     } catch (error) {
-      notify('error', normalizeError(error));
+      if (generation === overviewLoadGeneration) {
+        notify('error', normalizeError(error));
+      }
+    }
+  }
+
+  async function refreshRecentMedia() {
+    const generation = ++recentLoadGeneration;
+    try {
+      const items = await api.listRecentMedia(8);
+      if (generation === recentLoadGeneration) recentMedia = items;
+    } catch (error) {
+      if (generation === recentLoadGeneration) {
+        notify('error', normalizeError(error));
+      }
     }
   }
 
@@ -394,45 +430,92 @@
   }
 
   function showConnectServer() {
+    openServerForm({ mode: 'add' });
+  }
+
+  function openServerForm(form: ServerForm) {
     view = 'settings';
-    serverDraft = emptyServerDraft();
-    reauthenticatingServer = null;
-    resumeServerAfterLogin = false;
-    showServerForm = true;
+    serverForm = form;
+    serverFormError = '';
+    editPasswordMode = '';
+    serverDraft =
+      form.mode === 'add'
+        ? emptyServerDraft()
+        : {
+            kind: form.server.kind,
+            name: form.server.name,
+            baseUrl: form.server.baseUrl,
+            username: form.server.userName,
+            password: '',
+          };
+  }
+
+  async function showServerEditor(server: MediaServerSummary) {
+    openServerForm({ mode: 'edit', server });
+    await tick();
+    serverNameInput?.focus();
   }
 
   function showServerReauthentication(
     server: MediaServerSummary,
     resumeLibrary = false,
   ) {
-    if (reauthenticatingServer?.id === server.id && showServerForm) {
-      resumeServerAfterLogin ||= resumeLibrary;
+    if (
+      serverForm?.mode === 'reauthenticate' &&
+      serverForm.server.id === server.id
+    ) {
+      serverForm.resumeLibrary ||= resumeLibrary;
       view = 'settings';
-      return;
+      return false;
     }
-    view = 'settings';
-    reauthenticatingServer = server;
-    resumeServerAfterLogin = resumeLibrary;
-    serverDraft = {
-      kind: server.kind,
-      name: server.name,
-      baseUrl: server.baseUrl,
-      username: server.userName,
-      password: '',
-    };
-    showServerForm = true;
+    openServerForm({ mode: 'reauthenticate', server, resumeLibrary });
+    return true;
   }
 
   function closeServerForm() {
+    serverForm = null;
+    serverFormError = '';
+    editPasswordMode = '';
     serverDraft = emptyServerDraft();
-    reauthenticatingServer = null;
-    resumeServerAfterLogin = false;
-    showServerForm = false;
   }
 
   async function connectServer() {
-    const reconnecting = reauthenticatingServer;
-    const resumeLibrary = resumeServerAfterLogin;
+    const form = serverForm;
+    if (!form || busy) return;
+    serverFormError = '';
+    const input = {
+      kind: serverDraft.kind,
+      name: serverDraft.name.trim(),
+      baseUrl: serverDraft.baseUrl.trim(),
+      username: serverDraft.username.trim(),
+      password: serverDraft.password,
+    };
+    if (form.mode === 'edit') {
+      const password =
+        editPasswordMode === 'replace'
+          ? input.password
+          : editPasswordMode === 'none'
+            ? ''
+            : null;
+      await withBusy('正在保存服务器配置…', async () => {
+        let updated: MediaServerSummary;
+        try {
+          updated = await api.updateMediaServer(form.server.id, {
+            ...input,
+            password,
+          });
+        } catch (error) {
+          serverFormError = normalizeError(error);
+          return;
+        }
+        closeServerForm();
+        await applyServerEdit(form.server, updated);
+        notify('success', `已保存“${updated.name}”的配置`);
+      });
+      return;
+    }
+
+    const reconnecting = form.mode === 'reauthenticate' ? form.server : null;
     await withBusy(
       reconnecting
         ? `正在重新登录“${reconnecting.name}”…`
@@ -440,16 +523,10 @@
       async () => {
         const server = reconnecting
           ? await api.reauthenticateMediaServer(reconnecting.id, {
-              username: serverDraft.username.trim(),
-              password: serverDraft.password,
+              username: input.username,
+              password: input.password,
             })
-          : await api.addMediaServer({
-              kind: serverDraft.kind,
-              name: serverDraft.name.trim(),
-              baseUrl: serverDraft.baseUrl.trim(),
-              username: serverDraft.username.trim(),
-              password: serverDraft.password,
-            });
+          : await api.addMediaServer(input);
         closeServerForm();
         await refreshOverview();
         notify(
@@ -458,9 +535,44 @@
             ? `“${server.name}”已重新登录`
             : `已连接“${server.name}”`,
         );
-        if (reconnecting && resumeLibrary) await openRemoteServer(server);
+        if (form.mode === 'reauthenticate' && form.resumeLibrary) {
+          await openRemoteServer(server);
+        }
       },
     );
+  }
+
+  async function applyServerEdit(
+    previous: MediaServerSummary,
+    server: MediaServerSummary,
+  ) {
+    servers = servers.map((entry) => (entry.id === server.id ? server : entry));
+    const sourceChanged =
+      server.kind !== previous.kind ||
+      server.baseUrl !== previous.baseUrl ||
+      server.userId !== previous.userId ||
+      server.userName !== previous.userName;
+    if (sourceChanged) {
+      recentLoadGeneration += 1;
+      recentMedia = recentMedia.filter(
+        (item) => item.sourceKind !== 'remote' || item.sourceId !== server.id,
+      );
+    }
+    if (
+      selectedSource?.kind === 'remote' &&
+      selectedSource.server.id === server.id
+    ) {
+      if (sourceChanged) {
+        clearRemoteSource();
+      } else {
+        selectedSource = { kind: 'remote', server };
+        remoteCrumbs = remoteCrumbs.map((crumb, index) =>
+          index === 0 ? { ...crumb, name: server.name } : crumb,
+        );
+      }
+    }
+    await refreshOverview(false);
+    if (sourceChanged) void refreshRecentMedia();
   }
 
   async function openLocalFolder(
@@ -577,7 +689,7 @@
       remoteEntries = entries;
       void loadRemoteImages(server.id, entries, generation);
     } catch (error) {
-      handleRemoteError(error, server);
+      if (generation === remoteLoadGeneration) handleRemoteError(error, server);
     } finally {
       if (generation === remoteLoadGeneration) libraryLoading = false;
     }
@@ -596,7 +708,7 @@
       selectedSeasonId = preferredSeason(detail)?.id ?? null;
       void loadRemoteDetailImages(server.id, detail, generation);
     } catch (error) {
-      handleRemoteError(error, server);
+      if (generation === remoteLoadGeneration) handleRemoteError(error, server);
     } finally {
       if (generation === remoteLoadGeneration) libraryLoading = false;
     }
@@ -696,7 +808,9 @@
       if (generation === remoteLoadGeneration) remoteBackdrop = backdrop;
     } catch (error) {
       const server = servers.find((entry) => entry.id === serverId);
-      if (server && handleRemoteAuthenticationError(error, server)) return;
+      if (generation === remoteLoadGeneration && server) {
+        handleRemoteAuthenticationError(error, server);
+      }
       // The detail remains useful when a server image has disappeared.
     }
   }
@@ -720,7 +834,13 @@
           }
         } catch (error) {
           const server = servers.find((entry) => entry.id === serverId);
-          if (server && handleRemoteAuthenticationError(error, server)) return;
+          if (
+            generation === remoteLoadGeneration &&
+            server &&
+            handleRemoteAuthenticationError(error, server)
+          ) {
+            return;
+          }
           // Missing remote artwork uses the CSS fallback.
         }
       }
@@ -773,15 +893,18 @@
     }
     try {
       await api.removeMediaServer(server.id);
-      if (reauthenticatingServer?.id === server.id) closeServerForm();
+      if (
+        serverForm &&
+        'server' in serverForm &&
+        serverForm.server.id === server.id
+      ) {
+        closeServerForm();
+      }
       if (
         selectedSource?.kind === 'remote' &&
         selectedSource.server.id === server.id
       ) {
-        selectedSource = null;
-        remoteEntries = [];
-        remoteDetail = null;
-        remoteBackdrop = null;
+        clearRemoteSource();
         view = 'home';
       }
       await refreshOverview();
@@ -804,10 +927,12 @@
   async function playRemoteItem(itemId: string, name: string) {
     if (selectedSource?.kind !== 'remote') return;
     const server = selectedSource.server;
+    const generation = remoteLoadGeneration;
     try {
       await api.playRemoteMedia(server.id, itemId);
       notify('success', `已交给 mpv 播放：${name}`);
     } catch (error) {
+      if (generation !== remoteLoadGeneration) return;
       if (handleRemoteAuthenticationError(error, server)) return;
       handlePlaybackError(error);
     }
@@ -844,17 +969,22 @@
 
   function openLibrarySources() {
     localLoadGeneration += 1;
+    clearRemoteSource();
+    view = 'library';
+    localEntries = [];
+    currentPath = '';
+  }
+
+  function clearRemoteSource() {
     remoteLoadGeneration += 1;
     libraryLoading = false;
-    view = 'library';
     selectedSource = null;
-    localEntries = [];
     remoteEntries = [];
     remoteDetail = null;
     remoteImages = {};
     remoteBackdrop = null;
     remoteCrumbs = [];
-    currentPath = '';
+    selectedSeasonId = null;
     search = '';
   }
 
@@ -926,14 +1056,12 @@
     server: MediaServerSummary,
   ) {
     if (!isRemoteAuthenticationRequired(error)) return false;
-    const alreadyPrompting =
-      reauthenticatingServer?.id === server.id && showServerForm;
+    if (serverForm?.mode === 'edit') return true;
     const resumeLibrary =
       view === 'library' &&
       selectedSource?.kind === 'remote' &&
       selectedSource.server.id === server.id;
-    showServerReauthentication(server, resumeLibrary);
-    if (!alreadyPrompting) {
+    if (showServerReauthentication(server, resumeLibrary)) {
       notify('error', `“${server.name}”登录已失效，请重新登录`);
     }
     return true;
@@ -1390,7 +1518,10 @@
                   <strong>{item.name}</strong>
                   <small>{item.context}</small>
                   <span
-                    >{item.sourceName} · {formatUpdateTime(
+                    >{(item.sourceKind === 'remote'
+                      ? servers.find((server) => server.id === item.sourceId)
+                          ?.name
+                      : null) ?? item.sourceName} · {formatUpdateTime(
                       item.updatedAt,
                     )}</span
                   >
@@ -2385,18 +2516,30 @@
                   <button
                     aria-label={`打开 ${server.name}`}
                     title="打开媒体库"
+                    disabled={busy}
                     onclick={() => openRemoteServer(server)}
                     ><Icon name="library" size={17} /></button
                   >
                   <button
+                    aria-label={`编辑 ${server.name}`}
+                    aria-expanded={serverForm?.mode === 'edit' &&
+                      serverForm.server.id === server.id}
+                    title="编辑服务器"
+                    disabled={busy}
+                    onclick={() => showServerEditor(server)}
+                    ><Icon name="edit" size={17} /></button
+                  >
+                  <button
                     aria-label={`重新登录 ${server.name}`}
                     title="重新登录"
+                    disabled={busy}
                     onclick={() => showServerReauthentication(server)}
                     ><Icon name="refresh" size={17} /></button
                   >
                   <button
                     aria-label={`移除 ${server.name}`}
                     title="移除连接"
+                    disabled={busy}
                     onclick={() => removeServer(server)}
                     ><Icon name="trash" size={17} /></button
                   >
@@ -2405,7 +2548,7 @@
             </div>
           {/if}
 
-          {#if showServerForm}
+          {#if serverForm}
             <form
               class="server-form"
               onsubmit={(event) => {
@@ -2414,24 +2557,34 @@
               }}
             >
               <p class="form-note wide">
-                {#if reauthenticatingServer}
-                  正在更新“{reauthenticatingServer.name}”的登录凭据，连接记录和媒体库入口会保留。
+                {#if serverForm.mode === 'reauthenticate'}
+                  正在更新“{serverForm.server
+                    .name}”的登录凭据，连接记录和媒体库入口会保留。
+                {:else if serverForm.mode === 'edit'}
+                  编辑“{serverForm.server.name}”的连接配置。
                 {/if}
-                密码会保存在本机应用数据中，不使用系统钥匙串，仅供后端在令牌失效时自动重新登录。
+                {#if serverForm.mode !== 'edit' || editPasswordMode === 'replace'}
+                  密码会保存在本机应用数据中，不使用系统钥匙串，仅供后端在令牌失效时自动重新登录。
+                {/if}
               </p>
               <label
                 ><span>服务类型</span><select
                   bind:value={serverDraft.kind}
-                  disabled={!!reauthenticatingServer}
+                  disabled={busy || serverForm.mode === 'reauthenticate'}
                   ><option value="emby">Emby</option><option value="jellyfin"
                     >Jellyfin</option
                   ></select
                 ></label
               >
               <label
-                ><span>显示名称（可选）</span><input
+                ><span
+                  >显示名称{serverForm.mode === 'add' ? '（可选）' : ''}</span
+                ><input
+                  bind:this={serverNameInput}
                   bind:value={serverDraft.name}
-                  readonly={!!reauthenticatingServer}
+                  disabled={busy}
+                  required={serverForm.mode === 'edit'}
+                  readonly={serverForm.mode === 'reauthenticate'}
                   placeholder="例如：客厅媒体库"
                 /></label
               >
@@ -2440,7 +2593,8 @@
                   bind:value={serverDraft.baseUrl}
                   type="url"
                   required
-                  readonly={!!reauthenticatingServer}
+                  disabled={busy}
+                  readonly={serverForm.mode === 'reauthenticate'}
                   placeholder="http://192.168.1.20:8096"
                 /></label
               >
@@ -2448,25 +2602,72 @@
                 ><span>用户名</span><input
                   bind:value={serverDraft.username}
                   required
+                  disabled={busy}
                   autocomplete="username"
                   placeholder="Emby / Jellyfin 用户名"
                 /></label
               >
-              <label
-                ><span>密码</span><input
-                  bind:value={serverDraft.password}
-                  type="password"
-                  autocomplete="current-password"
-                  placeholder="无密码账户可留空"
-                /></label
-              >
+              {#if serverForm.mode === 'edit'}
+                <label>
+                  <span>密码</span>
+                  <select
+                    bind:value={editPasswordMode}
+                    required={editRequiresCredentials}
+                    disabled={busy}
+                    onchange={() => (serverDraft.password = '')}
+                  >
+                    <option value="">
+                      {editRequiresCredentials
+                        ? '请选择密码方式'
+                        : '保留当前密码'}
+                    </option>
+                    <option value="replace">输入密码</option>
+                    <option value="none">无密码账户</option>
+                  </select>
+                </label>
+                {#if editPasswordMode === 'replace'}
+                  <label class="wide">
+                    <span>服务器密码</span>
+                    <input
+                      bind:value={serverDraft.password}
+                      type="password"
+                      autocomplete="current-password"
+                      required
+                      disabled={busy}
+                    />
+                  </label>
+                {/if}
+              {:else}
+                <label>
+                  <span>密码</span>
+                  <input
+                    bind:value={serverDraft.password}
+                    type="password"
+                    autocomplete="current-password"
+                    placeholder="无密码账户可留空"
+                    disabled={busy}
+                  />
+                </label>
+              {/if}
+              {#if serverFormError}
+                <p class="form-note wide" role="alert">
+                  <strong>{serverFormError}</strong>
+                </p>
+              {/if}
               <div class="form-actions wide">
                 <button
                   type="button"
                   class="secondary"
+                  disabled={busy}
                   onclick={closeServerForm}>取消</button
-                ><button type="submit" class="primary"
-                  >{reauthenticatingServer ? '重新登录' : '测试并保存'}</button
+                ><button type="submit" class="primary" disabled={busy}
+                  >{serverForm.mode === 'reauthenticate'
+                    ? '重新登录'
+                    : serverForm.mode === 'edit' &&
+                        !editRequiresCredentials &&
+                        editPasswordMode === ''
+                      ? '保存'
+                      : '测试并保存'}</button
                 >
               </div>
             </form>

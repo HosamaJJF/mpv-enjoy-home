@@ -2056,6 +2056,9 @@ button.secondary:hover {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.4);
 }
+.server-list button {
+  flex: 0 0 auto;
+}
 .server-badge {
   flex: 0 0 auto;
   padding: 5px 7px;
@@ -2113,6 +2116,7 @@ button.secondary:hover {
   box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.08);
 }
 .server-form input:read-only,
+.server-form input:disabled,
 .server-form select:disabled {
   color: var(--muted);
   background: rgb(var(--accent-rgb) / 0.055);
@@ -2128,6 +2132,7 @@ button.secondary:hover {
   color: var(--muted);
   font-size: var(--font-meta);
   line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 .server-form .wide {
   grid-column: 1 / -1;
